@@ -161,6 +161,9 @@ class AnnouncementService {
     }
 
     formatNetworks(networks) {
+        if (networks === 'all') {
+            return 'TUTTE LE COLONNINE';
+        }
         if (Array.isArray(networks)) {
             return networks.length > 5 ? 'TUTTE LE COLONNINE' : networks.join(', ');
         }
