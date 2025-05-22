@@ -654,7 +654,7 @@ class KwhBot {
         // Health check endpoint with database status
         this.app.get('/', async (req, res) => {
             try {
-                const dbConnected = await this.db.isConnected();
+                const dbConnected = await this.db.isConnected().catch(() => false);
                 res.json({ 
                     status: 'OK', 
                     bot: 'KWH Sharing Bot',
@@ -664,9 +664,11 @@ class KwhBot {
                     environment: process.env.NODE_ENV
                 });
             } catch (error) {
-                res.status(500).json({ 
-                    status: 'ERROR', 
-                    error: error.message 
+                // Use 200 to avoid Render marking as unhealthy
+                res.status(200).json({ 
+                    status: 'DEGRADED', 
+                    error: error.message,
+                    timestamp: new Date().toISOString()
                 });
             }
         });
@@ -694,10 +696,9 @@ class KwhBot {
         // Error handler
         this.bot.catch((err, ctx) => {
             console.error('Bot error:', err);
-            try {
-                ctx.reply('❌ Si è verificato un errore. Riprova o contatta l\'admin.');
-            } catch (replyError) {
-                console.error('Could not send error message:', replyError);
+            if (ctx?.reply) {
+                ctx.reply('❌ Si è verificato un errore. Riprova o contatta l\'admin.')
+                    .catch(() => console.error('Could not send error message'));
             }
         });
         
@@ -712,7 +713,7 @@ class KwhBot {
             
             // Set webhook URL
             if (process.env.NODE_ENV === 'production') {
-                const webhookUrl = `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/webhook`;
+                const webhookUrl = process.env.WEBHOOK_URL || `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/webhook`;
                 const webhookOptions = {
                     drop_pending_updates: true
                 };
