@@ -89,7 +89,7 @@ class UserService {
     async calculateFeedbackStats(userId) {
         try {
             const pipeline = [
-                { $match: { userId: userId } },
+                { $match: { toUserId: userId } }, // Fix: era userId invece di toUserId
                 {
                     $group: {
                         _id: null,
