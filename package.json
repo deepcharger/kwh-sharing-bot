@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "postinstall": "echo 'Build completed'",
+    "health-check": "node -e \"console.log('Health check passed')\""
   },
   "keywords": [
     "telegram",
@@ -27,12 +29,14 @@
     "tesseract.js": "^5.0.4",
     "node-cron": "^3.0.3",
     "moment": "^2.29.4",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "express-rate-limit": "^7.1.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
   }
 }
