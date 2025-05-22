@@ -1,6 +1,8 @@
 const { Telegraf, Scenes, session } = require('telegraf');
 const express = require('express');
 const cron = require('node-cron');
+const rateLimit = require('express-rate-limit');
+const axios = require('axios');
 require('dotenv').config();
 
 const Database = require('./database/Database');
@@ -62,8 +64,12 @@ class KwhBot {
     }
 
     setupMiddleware() {
-        // Session middleware
-        this.bot.use(session());
+        // Session middleware with memory cleanup
+        this.bot.use(session({
+            defaultSession: () => ({}),
+            // TTL for sessions (6 hours)
+            ttl: 6 * 60 * 60
+        }));
         
         // Scene middleware
         const stage = new Scenes.Stage([
@@ -72,6 +78,14 @@ class KwhBot {
             createTransactionScene(this)
         ]);
         this.bot.use(stage.middleware());
+        
+        // Log middleware for debugging
+        this.bot.use(async (ctx, next) => {
+            const start = Date.now();
+            await next();
+            const ms = Date.now() - start;
+            console.log(`Response time: ${ms}ms`);
+        });
         
         // Group membership check middleware
         this.bot.use(async (ctx, next) => {
@@ -309,11 +323,20 @@ class KwhBot {
             );
         });
 
-        // Transaction-related callbacks that trigger scenes
+        // Transaction-related callbacks
         this.bot.action(/^seller_(accept|reject)$/, async (ctx) => {
-            // These actions need transaction context, so we need to extract it
-            // For now, we'll handle basic responses
             await ctx.answerCbQuery();
+            
+            // Extract transaction ID from previous message if available
+            const messageText = ctx.callbackQuery.message.text;
+            const transactionIdMatch = messageText.match(/ID: (T_[^\s]+)/);
+            
+            if (transactionIdMatch) {
+                const transactionId = transactionIdMatch[1];
+                ctx.session.transactionId = transactionId;
+                return ctx.scene.enter('transactionScene');
+            }
+            
             await ctx.reply('⚠️ Per gestire questa azione, usa il comando dedicato con l\'ID transazione.');
         });
 
@@ -600,26 +623,72 @@ class KwhBot {
                 console.error('Error in weekly cleanup:', error);
             }
         });
+
+        // Keep-alive ping (for free tier services)
+        if (process.env.NODE_ENV === 'production' && process.env.KEEP_ALIVE_URL) {
+            cron.schedule('*/14 * * * *', async () => {
+                try {
+                    await axios.get(process.env.KEEP_ALIVE_URL);
+                    console.log('Keep-alive ping sent');
+                } catch (error) {
+                    console.error('Keep-alive ping failed:', error.message);
+                }
+            });
+        }
     }
 
     setupWebhook() {
         // Setup Express server for webhook
         this.app.use(express.json());
         
-        // Health check endpoint
-        this.app.get('/', (req, res) => {
-            res.json({ 
-                status: 'OK', 
-                bot: 'KWH Sharing Bot',
-                timestamp: new Date().toISOString(),
-                uptime: process.uptime()
-            });
+        // Rate limiting
+        const limiter = rateLimit({
+            windowMs: 1 * 60 * 1000, // 1 minute
+            max: 30, // limit each IP to 30 requests per windowMs
+            message: 'Too many requests from this IP'
         });
         
-        // Webhook endpoint per Telegram
+        // Apply rate limiting to webhook endpoint
+        this.app.use('/webhook', limiter);
+        
+        // Health check endpoint with database status
+        this.app.get('/', async (req, res) => {
+            try {
+                const dbConnected = await this.db.isConnected();
+                res.json({ 
+                    status: 'OK', 
+                    bot: 'KWH Sharing Bot',
+                    timestamp: new Date().toISOString(),
+                    uptime: process.uptime(),
+                    database: dbConnected ? 'connected' : 'disconnected',
+                    environment: process.env.NODE_ENV
+                });
+            } catch (error) {
+                res.status(500).json({ 
+                    status: 'ERROR', 
+                    error: error.message 
+                });
+            }
+        });
+        
+        // Webhook endpoint per Telegram with security
         this.app.post('/webhook', (req, res) => {
-            this.bot.handleUpdate(req.body);
-            res.sendStatus(200);
+            // Verify webhook secret if configured
+            if (process.env.WEBHOOK_SECRET) {
+                const secret = req.headers['x-telegram-bot-api-secret-token'];
+                if (secret !== process.env.WEBHOOK_SECRET) {
+                    console.warn('Webhook request with invalid secret');
+                    return res.status(401).send('Unauthorized');
+                }
+            }
+            
+            try {
+                this.bot.handleUpdate(req.body);
+                res.sendStatus(200);
+            } catch (error) {
+                console.error('Error handling webhook:', error);
+                res.sendStatus(500);
+            }
         });
         
         // Error handler
@@ -644,9 +713,24 @@ class KwhBot {
             // Set webhook URL
             if (process.env.NODE_ENV === 'production') {
                 const webhookUrl = `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/webhook`;
+                const webhookOptions = {
+                    drop_pending_updates: true
+                };
+                
+                // Add webhook secret if configured
+                if (process.env.WEBHOOK_SECRET) {
+                    webhookOptions.secret_token = process.env.WEBHOOK_SECRET;
+                }
+                
                 try {
-                    await this.bot.telegram.setWebhook(webhookUrl);
+                    await this.bot.telegram.setWebhook(webhookUrl, webhookOptions);
+                    const webhookInfo = await this.bot.telegram.getWebhookInfo();
                     console.log(`✅ Webhook configurato: ${webhookUrl}`);
+                    console.log(`Webhook info:`, {
+                        url: webhookInfo.url,
+                        has_custom_certificate: webhookInfo.has_custom_certificate,
+                        pending_update_count: webhookInfo.pending_update_count
+                    });
                 } catch (error) {
                     console.error('❌ Errore configurazione webhook:', error);
                 }
