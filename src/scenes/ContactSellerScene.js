@@ -1,4 +1,18 @@
-const { Scenes } = require('telegraf');
+// Handle current type selection (AC/DC)
+    scene.action(/^select_(ac|dc)$/, async (ctx) => {
+        const currentType = ctx.match[1].toUpperCase();
+        ctx.session.purchaseData.currentType = currentType;
+        
+        await ctx.answerCbQuery();
+        await ctx.editMessageText(Messages.BUY_LOCATION, { reply_markup: undefined });
+    });
+
+    // Handle location (both text and location)
+    scene.on('location', async (ctx) => {
+        const { latitude, longitude } = ctx.message.location;
+        ctx.session.purchaseData.location = `GPS: ${latitude}, ${longitude}`;
+        await ctx.reply(Messages.BUY_SERIAL, Keyboards.CANCEL_ONLY);
+    });const { Scenes } = require('telegraf');
 const Messages = require('../utils/Messages');
 const Keyboards = require('../utils/Keyboards');
 const moment = require('moment');
@@ -62,7 +76,7 @@ function createContactSellerScene(bot) {
         return ctx.scene.leave();
     });
 
-    // Handle text messages for data collection
+    // Handle text location
     scene.on('text', async (ctx) => {
         const text = ctx.message.text;
         const data = ctx.session.purchaseData;
@@ -102,6 +116,13 @@ function createContactSellerScene(bot) {
             return;
         }
 
+        // Step 3: Location (if we're waiting for location and got text instead)
+        if (data.currentType && !data.location) {
+            data.location = text.trim();
+            await ctx.reply(Messages.BUY_SERIAL, Keyboards.CANCEL_ONLY);
+            return;
+        }
+
         // Step 4: Serial number
         if (!data.serialNumber) {
             data.serialNumber = text.trim();
@@ -115,34 +136,6 @@ function createContactSellerScene(bot) {
             
             // All data collected, create transaction and notify seller
             await createTransactionAndNotifySeller(ctx, bot);
-            return;
-        }
-    });
-
-    // Handle current type selection (AC/DC)
-    scene.action(/^select_(ac|dc)$/, async (ctx) => {
-        const currentType = ctx.match[1].toUpperCase();
-        ctx.session.purchaseData.currentType = currentType;
-        
-        await ctx.answerCbQuery();
-        await ctx.editMessageText(Messages.BUY_LOCATION, { reply_markup: undefined });
-    });
-
-    // Handle location (both text and location)
-    scene.on('location', async (ctx) => {
-        const { latitude, longitude } = ctx.message.location;
-        ctx.session.purchaseData.location = `GPS: ${latitude}, ${longitude}`;
-        await ctx.reply(Messages.BUY_SERIAL, Keyboards.CANCEL_ONLY);
-    });
-
-    // Handle text location
-    scene.on('text', async (ctx) => {
-        const data = ctx.session.purchaseData;
-        
-        // If we're waiting for location and got text instead
-        if (data.currentType && !data.location) {
-            data.location = ctx.message.text.trim();
-            await ctx.reply(Messages.BUY_SERIAL, Keyboards.CANCEL_ONLY);
             return;
         }
     });
