@@ -1,18 +1,4 @@
-// Handle current type selection (AC/DC)
-    scene.action(/^select_(ac|dc)$/, async (ctx) => {
-        const currentType = ctx.match[1].toUpperCase();
-        ctx.session.purchaseData.currentType = currentType;
-        
-        await ctx.answerCbQuery();
-        await ctx.editMessageText(Messages.BUY_LOCATION, { reply_markup: undefined });
-    });
-
-    // Handle location (both text and location)
-    scene.on('location', async (ctx) => {
-        const { latitude, longitude } = ctx.message.location;
-        ctx.session.purchaseData.location = `GPS: ${latitude}, ${longitude}`;
-        await ctx.reply(Messages.BUY_SERIAL, Keyboards.CANCEL_ONLY);
-    });const { Scenes } = require('telegraf');
+const { Scenes } = require('telegraf');
 const Messages = require('../utils/Messages');
 const Keyboards = require('../utils/Keyboards');
 const moment = require('moment');
@@ -74,6 +60,22 @@ function createContactSellerScene(bot) {
         await ctx.answerCbQuery();
         await ctx.editMessageText('❌ Acquisto annullato.', Keyboards.MAIN_MENU);
         return ctx.scene.leave();
+    });
+
+    // Handle current type selection (AC/DC)
+    scene.action(/^select_(ac|dc)$/, async (ctx) => {
+        const currentType = ctx.match[1].toUpperCase();
+        ctx.session.purchaseData.currentType = currentType;
+        
+        await ctx.answerCbQuery();
+        await ctx.editMessageText(Messages.BUY_LOCATION, { reply_markup: undefined });
+    });
+
+    // Handle location (both text and location)
+    scene.on('location', async (ctx) => {
+        const { latitude, longitude } = ctx.message.location;
+        ctx.session.purchaseData.location = `GPS: ${latitude}, ${longitude}`;
+        await ctx.reply(Messages.BUY_SERIAL, Keyboards.CANCEL_ONLY);
     });
 
     // Handle text location
