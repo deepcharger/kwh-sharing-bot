@@ -9,10 +9,8 @@ class Database {
 
     async connect() {
         try {
-            this.client = new MongoClient(this.uri, {
-                useNewUrlParser: true,
-                useUnifiedTopology: true
-            });
+            // Removed deprecated options
+            this.client = new MongoClient(this.uri);
             
             await this.client.connect();
             this.db = this.client.db('kwh_bot');
@@ -98,6 +96,7 @@ class Database {
     // Health check
     async isConnected() {
         try {
+            if (!this.db) return false;
             await this.db.admin().ping();
             return true;
         } catch (error) {
