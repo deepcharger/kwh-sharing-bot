@@ -22,6 +22,7 @@ class AnnouncementService {
                 currentType: announcementData.currentType,
                 zones: announcementData.zones,
                 networks: announcementData.networks,
+                networksList: announcementData.networksList || [],
                 availability: announcementData.availability,
                 paymentMethods: announcementData.paymentMethods,
                 conditions: announcementData.conditions || '',
@@ -120,7 +121,7 @@ class AnnouncementService {
     async formatAnnouncementMessage(announcement, userStats) {
         try {
             const currentTypeText = this.formatCurrentType(announcement.currentType);
-            const networksText = this.formatNetworks(announcement.networks);
+            const networksText = this.formatNetworks(announcement.networksList || announcement.networks);
             const sellerBadge = this.formatSellerBadge(userStats);
             
             let message = `🔋 Vendita kWh sharing\n`;
