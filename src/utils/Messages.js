@@ -356,7 +356,6 @@ Ora scrivi i KWH ricevuti (solo il numero):
             return `✅ *DATI CONFERMATI DAL BOT*
 
 📊 KWH validati: *${validationResult.declaredKwh} KWH*
-💰 Importo da pagare: *€${(validationResult.declaredKwh * validationResult.pricePerKwh).toFixed(2)}*
 
 Procedi con il pagamento come concordato con il venditore.`;
         } else {
