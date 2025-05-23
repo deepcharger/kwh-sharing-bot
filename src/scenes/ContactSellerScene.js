@@ -132,7 +132,10 @@ function createContactSellerScene(bot) {
         // Step 2: Brand
         if (!data.brand) {
             data.brand = text.trim().toUpperCase();
-            await ctx.reply(Messages.SELL_CURRENT_TYPE, Keyboards.getCurrentTypeSelectionKeyboard());
+            await ctx.reply('⚡ **Che tipo di corrente ti serve?**\n\nSeleziona il tipo di ricarica:', {
+                parse_mode: 'Markdown',
+                ...Keyboards.getCurrentTypeSelectionKeyboard()
+            });
             return;
         }
 
