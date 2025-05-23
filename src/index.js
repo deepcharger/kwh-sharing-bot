@@ -53,6 +53,7 @@ class KwhBot {
             this.setupCommands();
             this.setupCallbacks();
             this.setupCronJobs();
+            this.setupBotCommands();
             this.setupWebhook();
             
             console.log('🤖 Bot KWH Sharing inizializzato con successo!');
@@ -211,7 +212,9 @@ class KwhBot {
 
             let message = '📊 **I TUOI ANNUNCI ATTIVI:**\n\n';
             for (const ann of announcements) {
-                message += `🆔 ${ann.announcementId}\n`;
+                // Escape underscore in announcement ID for Markdown
+                const escapedId = ann.announcementId.replace(/_/g, '\\_');
+                message += `🆔 ${escapedId}\n`;
                 message += `💰 ${ann.price}€/KWH\n`;
                 message += `📅 Pubblicato: ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
             }
@@ -637,18 +640,44 @@ class KwhBot {
         }
     }
 
+    async setupBotCommands() {
+        try {
+            const commands = [
+                { command: 'start', description: 'Avvia il bot e mostra il menu principale' },
+                { command: 'help', description: 'Mostra la guida completa del bot' },
+                { command: 'admin', description: 'Dashboard amministratore (solo admin)' },
+                { command: 'stats', description: 'Mostra statistiche generali (solo admin)' }
+            ];
+            
+            await this.bot.telegram.setMyCommands(commands);
+            console.log('✅ Comandi bot impostati con successo');
+            
+        } catch (error) {
+            console.error('Errore impostazione comandi:', error);
+        }
+    }
+
     setupWebhook() {
         // Setup Express server for webhook
         this.app.use(express.json());
         
-        // Trust proxy for Render.com
-        this.app.set('trust proxy', true);
+        // Trust proxy for Render.com - specific configuration
+        this.app.set('trust proxy', 1); // Trust first proxy
         
-        // Rate limiting
+        // Rate limiting with proper configuration for proxied requests
         const limiter = rateLimit({
             windowMs: 1 * 60 * 1000, // 1 minute
             max: 30, // limit each IP to 30 requests per windowMs
-            message: 'Too many requests from this IP'
+            message: 'Too many requests from this IP',
+            standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+            legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+            // Skip rate limiting for health checks
+            skip: (req) => req.path === '/',
+            // Use custom key generator that handles proxied IPs properly
+            keyGenerator: (req) => {
+                // For Render.com, use the X-Forwarded-For header
+                return req.ip || req.headers['x-forwarded-for']?.split(',')[0] || 'unknown';
+            }
         });
         
         // Apply rate limiting to webhook endpoint
