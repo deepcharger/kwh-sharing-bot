@@ -1,3 +1,5 @@
+// File: src/scenes/TransactionScene.js - Versione corretta completa
+
 const { Scenes } = require('telegraf');
 const Messages = require('../utils/Messages');
 const Keyboards = require('../utils/Keyboards');
@@ -33,159 +35,46 @@ function createTransactionScene(bot) {
 
         ctx.session.transaction = transaction;
         
-        // Handle different entry points based on transaction status
-        await handleTransactionStatus(ctx, bot);
-    });
-
-    // Seller actions
-    scene.action('seller_accept', async (ctx) => {
-        await ctx.answerCbQuery();
-        const transaction = ctx.session.transaction;
-        
-        await bot.transactionService.updateTransactionStatus(
-            transaction.transactionId,
-            'confirmed'
-        );
-
-        // Notify buyer
-        try {
-            await ctx.telegram.sendMessage(
-                transaction.buyerId,
-                `✅ *Richiesta accettata!*\n\n` +
-                `Il venditore ha confermato la tua richiesta per ${transaction.scheduledDate}.\n` +
-                `Ti avviseremo quando sarà il momento della ricarica.`,
-                { parse_mode: 'Markdown' }
+        // Check if we're rejecting the transaction
+        if (ctx.session.rejectingTransaction) {
+            await ctx.editMessageText(
+                '📝 Motivo del rifiuto:\n\nScrivi il motivo per cui rifiuti questa richiesta:',
+                { reply_markup: undefined }
             );
-        } catch (error) {
-            console.error('Error notifying buyer:', error);
+            ctx.session.waitingFor = 'rejection_reason';
+            return;
         }
-
-        await ctx.editMessageText(
-            '✅ Richiesta accettata! L\'acquirente è stato notificato.',
-            Keyboards.MAIN_MENU
-        );
-
-        return ctx.scene.leave();
-    });
-
-    scene.action('seller_reject', async (ctx) => {
-        await ctx.answerCbQuery();
-        await ctx.editMessageText(
-            '📝 Motivo del rifiuto:\n\nScrivi il motivo per cui rifiuti questa richiesta:',
-            { reply_markup: undefined }
-        );
         
-        ctx.session.waitingFor = 'rejection_reason';
-    });
-
-    // Charging activation
-    scene.action('activate_charging', async (ctx) => {
-        await ctx.answerCbQuery();
-        const transaction = ctx.session.transaction;
-        
-        await bot.transactionService.updateTransactionStatus(
-            transaction.transactionId,
-            'charging_started'
-        );
-
-        // Notify buyer to confirm charging
-        try {
-            await ctx.telegram.sendMessage(
-                transaction.buyerId,
-                Messages.CHARGING_ACTIVATED,
-                Keyboards.getBuyerChargingConfirmKeyboard()
+        // Check if we confirmed charging
+        if (ctx.session.chargingConfirmed) {
+            await bot.transactionService.updateTransactionStatus(
+                transactionId,
+                'charging_in_progress'
             );
-        } catch (error) {
-            console.error('Error notifying buyer:', error);
-        }
 
-        await ctx.editMessageText(
-            '⚡ Ricarica attivata! In attesa della conferma dall\'acquirente.',
-            { reply_markup: undefined }
-        );
-
-        return ctx.scene.leave();
-    });
-
-    scene.action('delay_charging', async (ctx) => {
-        await ctx.answerCbQuery();
-        
-        setTimeout(async () => {
+            // Notify seller
             try {
                 await ctx.telegram.sendMessage(
-                    ctx.from.id,
-                    '⏰ Promemoria: È il momento di attivare la ricarica!',
-                    Keyboards.getActivateChargingKeyboard()
+                    transaction.sellerId,
+                    Messages.CHARGING_CONFIRMED,
+                    { parse_mode: 'Markdown' }
                 );
             } catch (error) {
-                console.error('Error sending delayed reminder:', error);
+                console.error('Error notifying seller:', error);
             }
-        }, 5 * 60 * 1000); // 5 minutes
 
-        await ctx.editMessageText('⏸️ Ricarica rimandata di 5 minuti. Riceverai un promemoria.');
-        return ctx.scene.leave();
-    });
-
-    // Buyer charging confirmation
-    scene.action('charging_confirmed', async (ctx) => {
-        await ctx.answerCbQuery();
-        const transaction = ctx.session.transaction;
-        
-        await bot.transactionService.updateTransactionStatus(
-            transaction.transactionId,
-            'charging_in_progress'
-        );
-
-        // Notify seller
-        try {
-            await ctx.telegram.sendMessage(
-                transaction.sellerId,
+            // Show charging completed button to buyer
+            await ctx.editMessageText(
                 Messages.CHARGING_CONFIRMED,
-                { parse_mode: 'Markdown' }
+                Keyboards.getChargingCompletedKeyboard()
             );
-        } catch (error) {
-            console.error('Error notifying seller:', error);
+            
+            ctx.session.chargingConfirmed = false;
+            return;
         }
-
-        // Show charging completed button to buyer
-        await ctx.editMessageText(
-            Messages.CHARGING_CONFIRMED,
-            Keyboards.getChargingCompletedKeyboard()
-        );
-    });
-
-    scene.action('charging_failed', async (ctx) => {
-        await ctx.answerCbQuery();
-        const transaction = ctx.session.transaction;
         
-        const retryCount = await bot.transactionService.incrementRetryCount(transaction.transactionId);
-        
-        // Notify seller about the issue
-        try {
-            await ctx.telegram.sendMessage(
-                transaction.sellerId,
-                Messages.CHARGING_FAILED_RETRY,
-                Keyboards.getRetryActivationKeyboard(retryCount)
-            );
-        } catch (error) {
-            console.error('Error notifying seller:', error);
-        }
-
-        await ctx.editMessageText(
-            '❌ Segnalazione ricevuta. Il venditore proverà a risolvere il problema.',
-            { reply_markup: undefined }
-        );
-
-        return ctx.scene.leave();
-    });
-
-    // Retry activation
-    scene.action('retry_activation', async (ctx) => {
-        await ctx.answerCbQuery();
-        await ctx.editMessageText(
-            '🔄 Riprovo attivazione...\n\nPremi quando hai attivato:',
-            Keyboards.getActivateChargingKeyboard()
-        );
+        // Handle different entry points based on transaction status
+        await handleTransactionStatus(ctx, bot);
     });
 
     // Charging finished
@@ -208,7 +97,7 @@ function createTransactionScene(bot) {
 
     // Handle photo upload
     scene.on('photo', async (ctx) => {
-        if (ctx.session.waitingFor !== 'display_photo') {
+        if (ctx.session.waitingFor !== 'display_photo' && ctx.session.waitingFor !== 'payment_proof') {
             await ctx.reply('❌ Non aspettavo una foto in questo momento.');
             return;
         }
@@ -216,19 +105,40 @@ function createTransactionScene(bot) {
         const transaction = ctx.session.transaction;
         const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Get highest resolution
 
-        // Store photo info
-        await bot.transactionService.updateTransactionStatus(
-            transaction.transactionId,
-            'photo_uploaded',
-            { displayPhoto: photo.file_id }
-        );
+        if (ctx.session.waitingFor === 'display_photo') {
+            // Store photo info
+            await bot.transactionService.updateTransactionStatus(
+                transaction.transactionId,
+                'photo_uploaded',
+                { displayPhoto: photo.file_id }
+            );
 
-        await ctx.reply(Messages.PHOTO_RECEIVED);
-        ctx.session.waitingFor = 'kwh_amount';
-        ctx.session.photoFileId = photo.file_id;
+            await ctx.reply(Messages.PHOTO_RECEIVED);
+            ctx.session.waitingFor = 'kwh_amount';
+            ctx.session.photoFileId = photo.file_id;
+            
+        } else if (ctx.session.waitingFor === 'payment_proof') {
+            // Forward proof to seller
+            try {
+                await ctx.telegram.sendPhoto(transaction.sellerId, photo.file_id, {
+                    caption: `📷 Prova di pagamento dall'acquirente @${ctx.from.username || ctx.from.first_name}\n\nTransazione: ${transaction.transactionId}`
+                });
+                
+                await ctx.reply(
+                    '✅ Prova di pagamento inviata al venditore.\n\n' +
+                    'Attendi la conferma.',
+                    Keyboards.MAIN_MENU
+                );
+            } catch (error) {
+                console.error('Error forwarding payment proof:', error);
+                await ctx.reply('❌ Errore nell\'invio. Riprova.');
+            }
+            
+            return ctx.scene.leave();
+        }
     });
 
-    // Handle KWH amount input
+    // Handle KWH amount input and other text inputs
     scene.on('text', async (ctx) => {
         const text = ctx.message.text;
         const transaction = ctx.session.transaction;
@@ -424,6 +334,9 @@ function createTransactionScene(bot) {
                 `🔍 ID Transazione: \`${transaction.transactionId}\``,
                 { parse_mode: 'Markdown' }
             );
+            
+            // Store ID in seller's session for later use
+            ctx.session.pendingPaymentTransactionId = transaction.transactionId;
         } catch (error) {
             console.error('Error notifying seller:', error);
         }
@@ -445,13 +358,32 @@ function createTransactionScene(bot) {
         );
     });
 
-    // Seller payment confirmation
+    // Seller payment confirmation - FIXED
     scene.action('payment_received', async (ctx) => {
         await ctx.answerCbQuery();
-        const transaction = ctx.session.transaction;
+        
+        // Get transaction ID from message
+        const messageText = ctx.callbackQuery.message.text;
+        const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
+        
+        let transactionId;
+        if (transactionIdMatch) {
+            transactionId = transactionIdMatch[1];
+        } else if (ctx.session.pendingPaymentTransactionId) {
+            transactionId = ctx.session.pendingPaymentTransactionId;
+        } else {
+            await ctx.reply('❌ ID transazione non trovato.');
+            return;
+        }
+        
+        const transaction = await bot.transactionService.getTransaction(transactionId);
+        if (!transaction) {
+            await ctx.editMessageText('❌ Transazione non trovata.');
+            return;
+        }
         
         await bot.transactionService.updateTransactionStatus(
-            transaction.transactionId,
+            transactionId,
             'completed'
         );
 
@@ -478,7 +410,7 @@ function createTransactionScene(bot) {
             // Send transaction ID for feedback
             await ctx.telegram.sendMessage(
                 transaction.buyerId,
-                `🔍 ID Transazione: \`${transaction.transactionId}\``,
+                `🔍 ID Transazione: \`${transactionId}\``,
                 { parse_mode: 'Markdown' }
             );
         } catch (error) {
@@ -490,15 +422,37 @@ function createTransactionScene(bot) {
             Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST,
             Keyboards.getFeedbackKeyboard()
         );
+        
+        // Store transaction for feedback
+        ctx.session.completedTransactionId = transactionId;
     });
 
     scene.action('payment_not_received', async (ctx) => {
         await ctx.answerCbQuery();
-        const transaction = ctx.session.transaction;
+        
+        // Get transaction ID
+        const messageText = ctx.callbackQuery.message.text;
+        const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
+        
+        let transactionId;
+        if (transactionIdMatch) {
+            transactionId = transactionIdMatch[1];
+        } else if (ctx.session.pendingPaymentTransactionId) {
+            transactionId = ctx.session.pendingPaymentTransactionId;
+        } else {
+            await ctx.reply('❌ ID transazione non trovato.');
+            return;
+        }
+        
+        const transaction = await bot.transactionService.getTransaction(transactionId);
+        if (!transaction) {
+            await ctx.editMessageText('❌ Transazione non trovata.');
+            return;
+        }
         
         // Add issue to transaction
         await bot.transactionService.addTransactionIssue(
-            transaction.transactionId,
+            transactionId,
             'Pagamento non ricevuto',
             transaction.sellerId
         );
@@ -524,12 +478,31 @@ function createTransactionScene(bot) {
         return ctx.scene.leave();
     });
 
-    // Feedback actions
+    // Feedback actions - FIXED
     scene.action(/^feedback_([1-5])$/, async (ctx) => {
         const rating = parseInt(ctx.match[1]);
         await ctx.answerCbQuery();
         
-        const transaction = ctx.session.transaction;
+        // Get transaction ID
+        let transactionId;
+        const messageText = ctx.callbackQuery.message.text;
+        const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
+        
+        if (transactionIdMatch) {
+            transactionId = transactionIdMatch[1];
+        } else if (ctx.session.completedTransactionId) {
+            transactionId = ctx.session.completedTransactionId;
+        } else {
+            await ctx.reply('❌ ID transazione non trovato.');
+            return;
+        }
+        
+        const transaction = await bot.transactionService.getTransaction(transactionId);
+        if (!transaction) {
+            await ctx.editMessageText('❌ Transazione non trovata.');
+            return;
+        }
+        
         const isSellerGivingFeedback = ctx.from.id === transaction.sellerId;
         const targetUserId = isSellerGivingFeedback ? transaction.buyerId : transaction.sellerId;
 
@@ -539,10 +512,11 @@ function createTransactionScene(bot) {
             ctx.session.waitingFor = 'feedback_reason';
             ctx.session.feedbackRating = rating;
             ctx.session.feedbackTargetUserId = targetUserId;
+            ctx.session.transaction = transaction;
         } else {
             // Positive feedback, no reason needed
             await bot.transactionService.createFeedback(
-                transaction.transactionId,
+                transactionId,
                 ctx.from.id,
                 targetUserId,
                 rating,
@@ -552,8 +526,15 @@ function createTransactionScene(bot) {
             await ctx.editMessageText(
                 '⭐ Grazie per il feedback!\n\n' +
                 'La transazione è stata completata con successo.',
-                Keyboards.MAIN_MENU
+                { reply_markup: undefined }
             );
+
+            // Clear session
+            delete ctx.session.completedTransactionId;
+            
+            setTimeout(() => {
+                ctx.reply('Usa il menu per altre operazioni:', Keyboards.MAIN_MENU);
+            }, 1000);
 
             return ctx.scene.leave();
         }
@@ -679,12 +660,14 @@ function createTransactionScene(bot) {
             'Seleziona il tipo di problema:',
             {
                 parse_mode: 'Markdown',
-                ...Markup.inlineKeyboard([
-                    [Markup.button.callback('🔌 Colonnina non risponde', 'issue_charger_not_responding')],
-                    [Markup.button.callback('❌ Errore attivazione', 'issue_activation_error')],
-                    [Markup.button.callback('📱 Problema app', 'issue_app_problem')],
-                    [Markup.button.callback('📞 Contatta admin', 'call_admin')]
-                ])
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🔌 Colonnina non risponde', callback_data: 'issue_charger_not_responding' }],
+                        [{ text: '❌ Errore attivazione', callback_data: 'issue_activation_error' }],
+                        [{ text: '📱 Problema app', callback_data: 'issue_app_problem' }],
+                        [{ text: '📞 Contatta admin', callback_data: 'call_admin' }]
+                    ]
+                }
             }
         );
     });
@@ -705,6 +688,15 @@ function createTransactionScene(bot) {
             '📝 Problema registrato.\n\n' +
             'Opzioni disponibili:',
             Keyboards.getRetryActivationKeyboard(transaction.retryCount || 0)
+        );
+    });
+
+    // Retry activation
+    scene.action('retry_activation', async (ctx) => {
+        await ctx.answerCbQuery();
+        await ctx.editMessageText(
+            '🔄 Riprovo attivazione...\n\nPremi quando hai attivato:',
+            Keyboards.getActivateChargingKeyboard()
         );
     });
 
@@ -759,6 +751,7 @@ function createTransactionScene(bot) {
                         Messages.FEEDBACK_REQUEST,
                         Keyboards.getFeedbackKeyboard()
                     );
+                    ctx.session.completedTransactionId = transaction.transactionId;
                 } else {
                     await ctx.reply('✅ Transazione completata con successo!', Keyboards.MAIN_MENU);
                     return ctx.scene.leave();
@@ -773,30 +766,22 @@ function createTransactionScene(bot) {
 
     // Handle unexpected messages
     scene.on('message', async (ctx) => {
-        if (ctx.message.photo && ctx.session.waitingFor === 'payment_proof') {
-            const transaction = ctx.session.transaction;
-            const photo = ctx.message.photo[ctx.message.photo.length - 1];
-            
-            // Forward proof to seller
-            try {
-                await ctx.telegram.sendPhoto(transaction.sellerId, photo.file_id, {
-                    caption: `📷 Prova di pagamento dall'acquirente @${ctx.from.username || ctx.from.first_name}\n\nTransazione: ${transaction.transactionId}`
-                });
-                
-                await ctx.reply(
-                    '✅ Prova di pagamento inviata al venditore.\n\n' +
-                    'Attendi la conferma.',
-                    Keyboards.MAIN_MENU
-                );
-            } catch (error) {
-                console.error('Error forwarding payment proof:', error);
-                await ctx.reply('❌ Errore nell\'invio. Riprova.');
-            }
-            
-            return ctx.scene.leave();
-        }
-        
-        await ctx.reply('❌ Messaggio non riconosciuto. Usa i pulsanti disponibili.');
+        await ctx.reply('❌ Messaggio non riconosciuto. Usa i pulsanti disponibili o /start per ricominciare.');
+    });
+
+    // Clean up on leave
+    scene.leave((ctx) => {
+        // Clean up session data
+        delete ctx.session.transactionId;
+        delete ctx.session.transaction;
+        delete ctx.session.waitingFor;
+        delete ctx.session.rejectingTransaction;
+        delete ctx.session.chargingConfirmed;
+        delete ctx.session.pendingPaymentTransactionId;
+        delete ctx.session.completedTransactionId;
+        delete ctx.session.photoFileId;
+        delete ctx.session.feedbackRating;
+        delete ctx.session.feedbackTargetUserId;
     });
 
     return scene;
