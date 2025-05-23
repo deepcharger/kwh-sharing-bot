@@ -223,8 +223,13 @@ class KwhBot {
             });
         });
 
-        // Pending requests command
+        // Pending requests command - VERSIONE CORRETTA
         this.bot.hears('📥 Richieste pendenti', async (ctx) => {
+            // Make sure we're not in any scene
+            if (ctx.scene) {
+                await ctx.scene.leave();
+            }
+            
             const userId = ctx.from.id;
             
             // Get pending transactions where user is seller
@@ -236,26 +241,53 @@ class KwhBot {
                 return;
             }
 
+            // Process each request
             for (const transaction of pendingRequests) {
-                // Get buyer info
-                const buyer = await this.userService.getUser(transaction.buyerId);
-                const buyerUsername = buyer?.username || 'utente';
-                
-                // Get announcement info
-                const announcement = await this.announcementService.getAnnouncement(transaction.announcementId);
-                
-                const requestText = Messages.formatPurchaseRequest(
-                    {
-                        ...transaction,
-                        buyerUsername
-                    },
-                    announcement
-                ) + `\n\n🔍 ID Transazione: \`${transaction.transactionId}\``;
-                
-                await ctx.reply(requestText, {
-                    parse_mode: 'Markdown',
-                    ...Keyboards.getSellerConfirmationKeyboard()
-                });
+                try {
+                    // Get buyer info
+                    const buyer = await this.userService.getUser(transaction.buyerId);
+                    const buyerUsername = buyer?.username || 'utente';
+                    
+                    // Get announcement info
+                    const announcement = await this.announcementService.getAnnouncement(transaction.announcementId);
+                    
+                    if (!announcement) {
+                        console.error(`Announcement not found for transaction ${transaction.transactionId}`);
+                        continue;
+                    }
+                    
+                    const requestText = Messages.formatPurchaseRequest(
+                        {
+                            ...transaction,
+                            buyerUsername
+                        },
+                        announcement
+                    ) + `\n\n🔍 ID Transazione: \`${transaction.transactionId}\``;
+                    
+                    // Create inline keyboard with transaction ID embedded
+                    const keyboard = {
+                        inline_keyboard: [
+                            [
+                                { text: '✅ Accetto la richiesta', callback_data: `accept_request_${transaction.transactionId}` },
+                                { text: '❌ Rifiuto', callback_data: `reject_request_${transaction.transactionId}` }
+                            ],
+                            [
+                                { text: '💬 Contatta acquirente', callback_data: `contact_buyer_${transaction.buyerId}_${buyer.username || 'user'}` }
+                            ]
+                        ]
+                    };
+                    
+                    await ctx.reply(requestText, {
+                        parse_mode: 'Markdown',
+                        reply_markup: keyboard
+                    });
+                    
+                    // Add small delay between messages to avoid rate limiting
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                } catch (error) {
+                    console.error(`Error processing transaction ${transaction.transactionId}:`, error);
+                }
             }
             
             await ctx.reply(
@@ -291,6 +323,57 @@ class KwhBot {
                 parse_mode: 'Markdown',
                 ...Keyboards.getHelpKeyboard()
             });
+        });
+
+        // Handler per gestire il testo dopo richiesta di motivo rifiuto
+        this.bot.on('text', async (ctx, next) => {
+            // Check if we're waiting for rejection reason
+            if (ctx.session?.waitingForRejectionReason && ctx.session?.rejectingTransactionId) {
+                const reason = ctx.message.text;
+                const transactionId = ctx.session.rejectingTransactionId;
+                
+                // Clear session flags
+                delete ctx.session.waitingForRejectionReason;
+                delete ctx.session.rejectingTransactionId;
+                
+                // Get transaction
+                const transaction = await this.transactionService.getTransaction(transactionId);
+                if (!transaction) {
+                    await ctx.reply('❌ Transazione non trovata.');
+                    return;
+                }
+                
+                // Update transaction
+                await this.transactionService.updateTransactionStatus(
+                    transactionId,
+                    'cancelled',
+                    { cancellationReason: reason }
+                );
+
+                // Notify buyer
+                try {
+                    await ctx.telegram.sendMessage(
+                        transaction.buyerId,
+                        `❌ *Richiesta rifiutata*\n\n` +
+                        `Il venditore ha rifiutato la tua richiesta.\n` +
+                        `Motivo: ${reason}\n\n` +
+                        `Puoi provare con un altro venditore.`,
+                        { parse_mode: 'Markdown' }
+                    );
+                } catch (error) {
+                    console.error('Error notifying buyer:', error);
+                }
+
+                await ctx.reply(
+                    '❌ Richiesta rifiutata. L\'acquirente è stato notificato.',
+                    Keyboards.MAIN_MENU
+                );
+                
+                return; // Don't call next()
+            }
+            
+            // Continue to next handler if not handling rejection
+            return next();
         });
     }
 
@@ -360,6 +443,10 @@ class KwhBot {
         // Back to main menu - FIXED
         this.bot.action('back_to_main', async (ctx) => {
             await ctx.answerCbQuery();
+            // Leave any active scene
+            if (ctx.scene) {
+                await ctx.scene.leave();
+            }
             // Delete the inline message
             await ctx.deleteMessage();
             // Send new message with reply keyboard
@@ -372,47 +459,406 @@ class KwhBot {
             );
         });
 
-        // Transaction-related callbacks
-        this.bot.action(/^seller_(accept|reject)$/, async (ctx) => {
+        // Handler per accettare richiesta con ID incorporato
+        this.bot.action(/^accept_request_(.+)$/, async (ctx) => {
             await ctx.answerCbQuery();
             
-            // Extract transaction ID from previous message if available
-            const messageText = ctx.callbackQuery.message.text;
-            const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
+            const transactionId = ctx.match[1];
+            const transaction = await this.transactionService.getTransaction(transactionId);
             
-            if (transactionIdMatch) {
-                const transactionId = transactionIdMatch[1];
-                ctx.session.transactionId = transactionId;
-                return ctx.scene.enter('transactionScene');
-            }
-            
-            await ctx.reply('⚠️ Per gestire questa azione, usa il comando dedicato con l\'ID transazione.');
-        });
-
-        // Contact buyer action
-        this.bot.action('contact_buyer', async (ctx) => {
-            await ctx.answerCbQuery();
-            
-            // Extract buyer username from the message
-            const messageText = ctx.callbackQuery.message.text;
-            const buyerMatch = messageText.match(/Acquirente: @(\w+)/);
-            
-            if (!buyerMatch) {
-                await ctx.reply('❌ Non riesco a trovare le informazioni dell\'acquirente.');
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
                 return;
             }
             
-            const buyerUsername = buyerMatch[1];
-            
-            await ctx.reply(
-                `💬 **Per contattare l'acquirente:**\n\n` +
-                `Puoi scrivere direttamente a @${buyerUsername} su Telegram.\n\n` +
-                `📝 **Suggerimenti:**\n` +
-                `• Conferma i dettagli della ricarica\n` +
-                `• Chiarisci eventuali dubbi\n` +
-                `• Coordina l'orario se necessario\n\n` +
-                `⚠️ **Ricorda:** Dopo aver chiarito, torna qui per accettare o rifiutare la richiesta.`,
+            // Update transaction status
+            await this.transactionService.updateTransactionStatus(
+                transactionId,
+                'confirmed'
+            );
+
+            // Notify buyer
+            try {
+                await ctx.telegram.sendMessage(
+                    transaction.buyerId,
+                    `✅ *Richiesta accettata!*\n\n` +
+                    `Il venditore ha confermato la tua richiesta per ${transaction.scheduledDate}.\n` +
+                    `Ti avviseremo quando sarà il momento della ricarica.`,
+                    { parse_mode: 'Markdown' }
+                );
+            } catch (error) {
+                console.error('Error notifying buyer:', error);
+            }
+
+            await ctx.editMessageText(
+                '✅ Richiesta accettata! L\'acquirente è stato notificato.\n\n' +
+                'Riceverai una notifica quando sarà il momento di attivare la ricarica.',
                 { parse_mode: 'Markdown' }
+            );
+            
+            // Schedule reminder for charging time (for testing, using 30 seconds)
+            setTimeout(async () => {
+                try {
+                    await ctx.telegram.sendMessage(
+                        transaction.sellerId,
+                        `⏰ È il momento di attivare la ricarica!\n\n` +
+                        `ID Transazione: \`${transactionId}\`\n` +
+                        `Data/ora: ${transaction.scheduledDate}\n` +
+                        `Colonnina: ${transaction.brand}\n` +
+                        `Posizione: ${transaction.location}`,
+                        {
+                            parse_mode: 'Markdown',
+                            ...Keyboards.getActivateChargingKeyboard()
+                        }
+                    );
+                } catch (error) {
+                    console.error('Error sending charging reminder:', error);
+                }
+            }, 30000); // 30 seconds for testing
+        });
+
+        // Handler per rifiutare richiesta con ID incorporato
+        this.bot.action(/^reject_request_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const transactionId = ctx.match[1];
+            
+            // Store transaction ID and ask for reason
+            ctx.session.rejectingTransactionId = transactionId;
+            
+            await ctx.editMessageText(
+                '📝 *Motivo del rifiuto:*\n\n' +
+                'Scrivi brevemente il motivo per cui rifiuti questa richiesta:',
+                { parse_mode: 'Markdown' }
+            );
+            
+            // Set a flag to handle the next text message
+            ctx.session.waitingForRejectionReason = true;
+        });
+
+        // Handler per contattare acquirente con dati incorporati
+        this.bot.action(/^contact_buyer_(\d+)_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const buyerId = ctx.match[1];
+            const buyerUsername = ctx.match[2];
+            
+            // Create a direct Telegram link
+            const telegramLink = buyerUsername !== 'user' ? 
+                `https://t.me/${buyerUsername}` : 
+                `tg://user?id=${buyerId}`;
+            
+            const message = `💬 **Contatta l'acquirente**\n\n`;
+            
+            if (buyerUsername !== 'user') {
+                await ctx.reply(
+                    message +
+                    `Puoi contattare direttamente @${buyerUsername} cliccando qui:\n` +
+                    `${telegramLink}\n\n` +
+                    `📝 **Suggerimenti per la conversazione:**\n` +
+                    `• Conferma i dettagli della ricarica\n` +
+                    `• Chiarisci eventuali dubbi sulla colonnina\n` +
+                    `• Coordina l'orario se necessario\n` +
+                    `• Discuti il metodo di pagamento preferito\n\n` +
+                    `⚠️ **Importante:** Dopo aver chiarito tutti i dettagli, torna qui per accettare o rifiutare la richiesta.`,
+                    { 
+                        parse_mode: 'Markdown',
+                        disable_web_page_preview: true 
+                    }
+                );
+            } else {
+                await ctx.reply(
+                    message +
+                    `L'utente non ha un username pubblico.\n` +
+                    `ID Utente: \`${buyerId}\`\n\n` +
+                    `Puoi provare a contattarlo tramite il link:\n${telegramLink}\n\n` +
+                    `Oppure attendi che ti contatti lui.`,
+                    { 
+                        parse_mode: 'Markdown',
+                        disable_web_page_preview: true 
+                    }
+                );
+            }
+        });
+
+        // Handler per attivare la ricarica
+        this.bot.action('activate_charging', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            // Extract transaction ID from message
+            const messageText = ctx.callbackQuery.message.text;
+            const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
+            
+            if (!transactionIdMatch) {
+                await ctx.reply('❌ ID transazione non trovato.');
+                return;
+            }
+            
+            const transactionId = transactionIdMatch[1];
+            const transaction = await this.transactionService.getTransaction(transactionId);
+            
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            await this.transactionService.updateTransactionStatus(
+                transactionId,
+                'charging_started'
+            );
+
+            // Notify buyer to confirm charging
+            try {
+                await ctx.telegram.sendMessage(
+                    transaction.buyerId,
+                    `⚡ *RICARICA ATTIVATA!*\n\n` +
+                    `Il venditore ha attivato la ricarica.\n` +
+                    `Controlla il connettore e conferma se la ricarica è iniziata.\n\n` +
+                    `💡 *Se non sta caricando:*\n` +
+                    `• Verifica che il cavo sia inserito bene\n` +
+                    `• Controlla che l'auto sia pronta\n` +
+                    `• Riprova l'attivazione\n\n` +
+                    `ID Transazione: \`${transactionId}\``,
+                    {
+                        parse_mode: 'Markdown',
+                        ...Keyboards.getBuyerChargingConfirmKeyboard()
+                    }
+                );
+            } catch (error) {
+                console.error('Error notifying buyer:', error);
+            }
+
+            await ctx.editMessageText(
+                '⚡ Ricarica attivata!\n\n' +
+                'In attesa della conferma dall\'acquirente che la ricarica sia iniziata correttamente.',
+                { parse_mode: 'Markdown' }
+            );
+        });
+
+        // Handler per ritardare la ricarica
+        this.bot.action('delay_charging', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const messageText = ctx.callbackQuery.message.text;
+            const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
+            const transactionId = transactionIdMatch ? transactionIdMatch[1] : null;
+            
+            setTimeout(async () => {
+                try {
+                    let message = '⏰ Promemoria: È il momento di attivare la ricarica!';
+                    if (transactionId) {
+                        message += `\n\nID Transazione: \`${transactionId}\``;
+                    }
+                    
+                    await ctx.telegram.sendMessage(
+                        ctx.from.id,
+                        message,
+                        {
+                            parse_mode: 'Markdown',
+                            ...Keyboards.getActivateChargingKeyboard()
+                        }
+                    );
+                } catch (error) {
+                    console.error('Error sending delayed reminder:', error);
+                }
+            }, 5 * 60 * 1000); // 5 minutes
+
+            await ctx.editMessageText(
+                '⏸️ Ricarica rimandata di 5 minuti.\n\n' +
+                'Riceverai un promemoria quando sarà il momento di attivare.',
+                { parse_mode: 'Markdown' }
+            );
+        });
+
+        // Handler per problemi tecnici
+        this.bot.action('technical_issues', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const messageText = ctx.callbackQuery.message.text;
+            const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
+            const transactionId = transactionIdMatch ? transactionIdMatch[1] : null;
+            
+            const keyboard = {
+                inline_keyboard: [
+                    [{ text: '🔌 Colonnina non risponde', callback_data: `issue_charger_${transactionId}` }],
+                    [{ text: '❌ Errore attivazione', callback_data: `issue_activation_${transactionId}` }],
+                    [{ text: '📱 Problema app', callback_data: `issue_app_${transactionId}` }],
+                    [{ text: '📞 Contatta admin', callback_data: `call_admin_${transactionId}` }]
+                ]
+            };
+            
+            await ctx.editMessageText(
+                '⚠️ *Problemi tecnici rilevati*\n\n' +
+                'Seleziona il tipo di problema:',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: keyboard
+                }
+            );
+        });
+
+        // Handler per tipi di problemi tecnici
+        this.bot.action(/^issue_(charger|activation|app)_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const issueType = ctx.match[1];
+            const transactionId = ctx.match[2];
+            
+            if (!transactionId || transactionId === 'null') {
+                await ctx.reply('❌ ID transazione non trovato.');
+                return;
+            }
+            
+            const transaction = await this.transactionService.getTransaction(transactionId);
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            // Add issue to transaction
+            await this.transactionService.addTransactionIssue(
+                transactionId,
+                `Problema: ${issueType}`,
+                ctx.from.id
+            );
+            
+            // Notify buyer about the issue
+            try {
+                await ctx.telegram.sendMessage(
+                    transaction.buyerId,
+                    `⚠️ *Problema tecnico segnalato*\n\n` +
+                    `Il venditore sta riscontrando problemi con: ${issueType}\n` +
+                    `Sta lavorando per risolverlo.\n\n` +
+                    `Ti terremo aggiornato.`,
+                    { parse_mode: 'Markdown' }
+                );
+            } catch (error) {
+                console.error('Error notifying buyer:', error);
+            }
+            
+            await ctx.editMessageText(
+                '📝 Problema registrato.\n\n' +
+                'L\'acquirente è stato informato. Riprova l\'attivazione quando possibile.',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [[
+                            { text: '🔄 Riprova attivazione', callback_data: `retry_activation_${transactionId}` }
+                        ]]
+                    }
+                }
+            );
+        });
+
+        // Handler per riprovare attivazione
+        this.bot.action(/^retry_activation_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const transactionId = ctx.match[1];
+            
+            await ctx.editMessageText(
+                '🔄 Riprova ad attivare la ricarica quando sei pronto.\n\n' +
+                `ID Transazione: \`${transactionId}\``,
+                {
+                    parse_mode: 'Markdown',
+                    ...Keyboards.getActivateChargingKeyboard()
+                }
+            );
+        });
+
+        // Handler per chiamare admin con transazione specifica
+        this.bot.action(/^call_admin_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const transactionId = ctx.match[1];
+            
+            if (!transactionId || transactionId === 'null') {
+                await ctx.reply('❌ ID transazione non trovato.');
+                return;
+            }
+            
+            // Notify admin
+            const adminMessage = Messages.formatAdminAlert(
+                transactionId,
+                'Richiesta aiuto per problemi tecnici',
+                ctx.from.username || ctx.from.first_name
+            );
+
+            try {
+                await ctx.telegram.sendMessage(
+                    this.adminUserId,
+                    adminMessage,
+                    { parse_mode: 'Markdown' }
+                );
+            } catch (error) {
+                console.error('Error notifying admin:', error);
+            }
+
+            await ctx.editMessageText(
+                '📞 Admin contattato!\n\n' +
+                'Un amministratore ti aiuterà il prima possibile.',
+                { parse_mode: 'Markdown' }
+            );
+        });
+
+        // Buyer charging confirmation callbacks
+        this.bot.action('charging_confirmed', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            // Need to get transaction from message context
+            const messageText = ctx.callbackQuery.message.text;
+            const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
+            
+            if (!transactionIdMatch) {
+                // Try to get from previous message in conversation
+                await ctx.reply('⚠️ Per continuare, inserisci l\'ID della transazione.');
+                return;
+            }
+            
+            const transactionId = transactionIdMatch[1];
+            ctx.session.transactionId = transactionId;
+            ctx.session.chargingConfirmed = true;
+            await ctx.scene.enter('transactionScene');
+        });
+
+        this.bot.action('charging_failed', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const messageText = ctx.callbackQuery.message.text;
+            const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
+            
+            if (!transactionIdMatch) {
+                await ctx.reply('⚠️ ID transazione non trovato.');
+                return;
+            }
+            
+            const transactionId = transactionIdMatch[1];
+            const transaction = await this.transactionService.getTransaction(transactionId);
+            
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            const retryCount = await this.transactionService.incrementRetryCount(transactionId);
+            
+            // Notify seller
+            try {
+                await ctx.telegram.sendMessage(
+                    transaction.sellerId,
+                    Messages.CHARGING_FAILED_RETRY + `\n\nID Transazione: \`${transactionId}\``,
+                    {
+                        parse_mode: 'Markdown',
+                        ...Keyboards.getRetryActivationKeyboard(retryCount)
+                    }
+                );
+            } catch (error) {
+                console.error('Error notifying seller:', error);
+            }
+
+            await ctx.editMessageText(
+                '❌ Segnalazione ricevuta. Il venditore proverà a risolvere il problema.',
+                { reply_markup: undefined }
             );
         });
 
