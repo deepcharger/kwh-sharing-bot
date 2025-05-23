@@ -260,7 +260,13 @@ Indica il tipo di connettore che utilizzerai.
 • Type2 (Mennekes) - AC
 • Type1 (J1772) - AC
 
-Scrivi il tipo di connettore:`;
+*Se ci sono più connettori dello stesso tipo*, specifica anche il numero:
+• CCS2 1 (primo connettore CCS)
+• CCS2 2 (secondo connettore CCS)
+• Type2 1 (primo connettore Type2)
+• Type2 2 (secondo connettore Type2)
+
+Scrivi il tipo di connettore (e numero se necessario):`;
     }
 
     static formatPurchaseRequest(transactionData, announcement) {
