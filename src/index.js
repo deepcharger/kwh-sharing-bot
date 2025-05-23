@@ -333,7 +333,7 @@ class KwhBot {
             
             // Extract transaction ID from previous message if available
             const messageText = ctx.callbackQuery.message.text;
-            const transactionIdMatch = messageText.match(/ID: (T_[^\s]+)/);
+            const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
             
             if (transactionIdMatch) {
                 const transactionId = transactionIdMatch[1];
