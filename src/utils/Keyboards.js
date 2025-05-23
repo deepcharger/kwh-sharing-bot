@@ -109,11 +109,11 @@ class Keyboards {
         ]);
     }
 
-    static getPhotoRetryKeyboard() {
+    static getKwhValidationKeyboard(transactionId) {
         return Markup.inlineKeyboard([
-            [Markup.button.callback('📷 Scatta foto più nitida', 'retry_photo')],
-            [Markup.button.callback('📝 Solo KWH (verifica manuale)', 'manual_kwh_only')],
-            [Markup.button.callback('📞 Richiedi verifica admin', 'request_admin_verification')]
+            [Markup.button.callback('✅ Sì, KWH corretti', `kwh_correct_${transactionId}`)],
+            [Markup.button.callback('❌ No, KWH errati', `kwh_incorrect_${transactionId}`)],
+            [Markup.button.callback('📞 Contatta admin', `call_admin_${transactionId}`)]
         ]);
     }
 
