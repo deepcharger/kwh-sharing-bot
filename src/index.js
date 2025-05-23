@@ -200,7 +200,7 @@ class KwhBot {
             await ctx.scene.enter('sellAnnouncementScene');
         });
 
-        // My announcements command
+        // My announcements command - FIXED VERSION
         this.bot.hears('📊 I miei annunci', async (ctx) => {
             const userId = ctx.from.id;
             const announcements = await this.announcementService.getUserAnnouncements(userId);
@@ -210,17 +210,15 @@ class KwhBot {
                 return;
             }
 
-            let message = '📊 **I TUOI ANNUNCI ATTIVI:**\n\n';
+            let message = '📊 <b>I TUOI ANNUNCI ATTIVI:</b>\n\n';
             for (const ann of announcements) {
-                // Escape underscore in announcement ID for Markdown
-                const escapedId = ann.announcementId.replace(/_/g, '\\_');
-                message += `🆔 ${escapedId}\n`;
+                message += `🆔 ${ann.announcementId}\n`;
                 message += `💰 ${ann.price}€/KWH\n`;
                 message += `📅 Pubblicato: ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
             }
             
             await ctx.reply(message, {
-                parse_mode: 'Markdown',
+                parse_mode: 'HTML',
                 ...Keyboards.getUserAnnouncementsKeyboard(announcements)
             });
         });
