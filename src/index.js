@@ -223,6 +223,51 @@ class KwhBot {
             });
         });
 
+        // Pending requests command
+        this.bot.hears('📥 Richieste pendenti', async (ctx) => {
+            const userId = ctx.from.id;
+            
+            // Get pending transactions where user is seller
+            const pendingTransactions = await this.transactionService.getUserTransactions(userId, 'seller');
+            const pendingRequests = pendingTransactions.filter(t => t.status === 'pending_seller_confirmation');
+            
+            if (pendingRequests.length === 0) {
+                await ctx.reply('📭 Non hai richieste di acquisto in attesa.', Keyboards.MAIN_MENU);
+                return;
+            }
+
+            for (const transaction of pendingRequests) {
+                // Get buyer info
+                const buyer = await this.userService.getUser(transaction.buyerId);
+                const buyerUsername = buyer?.username || 'utente';
+                
+                // Get announcement info
+                const announcement = await this.announcementService.getAnnouncement(transaction.announcementId);
+                
+                const requestText = Messages.formatPurchaseRequest(
+                    {
+                        ...transaction,
+                        buyerUsername
+                    },
+                    announcement
+                ) + `\n\n🔍 ID Transazione: \`${transaction.transactionId}\``;
+                
+                await ctx.reply(requestText, {
+                    parse_mode: 'Markdown',
+                    ...Keyboards.getSellerConfirmationKeyboard()
+                });
+            }
+            
+            await ctx.reply(
+                `📥 Hai ${pendingRequests.length} richieste in attesa.\n\n` +
+                `Gestiscile una alla volta usando i pulsanti sopra.`,
+                {
+                    parse_mode: 'Markdown',
+                    ...Keyboards.MAIN_MENU
+                }
+            );
+        });
+
         // My feedback command
         this.bot.hears('⭐ I miei feedback', async (ctx) => {
             const userId = ctx.from.id;
