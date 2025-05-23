@@ -10,9 +10,9 @@ class AnnouncementService {
 
     async createAnnouncement(userId, announcementData) {
         try {
-            // Genera ID univoco per l'annuncio
+            // Genera ID univoco per l'annuncio - USA TRATTINO INVECE DI UNDERSCORE
             const timestamp = moment().format('YYYYMMDDHHmmss');
-            const announcementId = `A${userId}_${timestamp}`;
+            const announcementId = `A${userId}-${timestamp}`;
             
             const announcement = {
                 announcementId,
