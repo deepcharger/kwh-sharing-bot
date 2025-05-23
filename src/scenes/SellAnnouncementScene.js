@@ -77,7 +77,8 @@ function createSellAnnouncementScene(bot) {
         
         if (currentType === 'cancel') {
             await ctx.answerCbQuery();
-            await ctx.reply('❌ Creazione annuncio annullata.', Keyboards.MAIN_MENU);
+            await ctx.editMessageText('❌ Creazione annuncio annullata.', { reply_markup: undefined });
+            await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
             return ctx.scene.leave();
         }
 
@@ -149,11 +150,13 @@ function createSellAnnouncementScene(bot) {
                 publishedMessage.message_id
             );
 
-            await ctx.editMessageText(Messages.ANNOUNCEMENT_PUBLISHED, Keyboards.MAIN_MENU);
+            await ctx.editMessageText(Messages.ANNOUNCEMENT_PUBLISHED, { reply_markup: undefined });
+            await ctx.reply('Usa il menu per altre operazioni:', Keyboards.MAIN_MENU);
             
         } catch (error) {
             console.error('Error publishing announcement:', error);
-            await ctx.editMessageText(Messages.ERROR_MESSAGES.GENERIC_ERROR, Keyboards.MAIN_MENU);
+            await ctx.editMessageText(Messages.ERROR_MESSAGES.GENERIC_ERROR, { reply_markup: undefined });
+            await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
         }
 
         return ctx.scene.leave();
@@ -168,7 +171,8 @@ function createSellAnnouncementScene(bot) {
 
     scene.action('cancel', async (ctx) => {
         await ctx.answerCbQuery();
-        await ctx.editMessageText('❌ Creazione annuncio annullata.', Keyboards.MAIN_MENU);
+        await ctx.editMessageText('❌ Creazione annuncio annullata.', { reply_markup: undefined });
+        await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
         return ctx.scene.leave();
     });
 
