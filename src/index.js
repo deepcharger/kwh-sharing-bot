@@ -344,6 +344,33 @@ class KwhBot {
             await ctx.reply('⚠️ Per gestire questa azione, usa il comando dedicato con l\'ID transazione.');
         });
 
+        // Contact buyer action
+        this.bot.action('contact_buyer', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            // Extract buyer username from the message
+            const messageText = ctx.callbackQuery.message.text;
+            const buyerMatch = messageText.match(/Acquirente: @(\w+)/);
+            
+            if (!buyerMatch) {
+                await ctx.reply('❌ Non riesco a trovare le informazioni dell\'acquirente.');
+                return;
+            }
+            
+            const buyerUsername = buyerMatch[1];
+            
+            await ctx.reply(
+                `💬 **Per contattare l'acquirente:**\n\n` +
+                `Puoi scrivere direttamente a @${buyerUsername} su Telegram.\n\n` +
+                `📝 **Suggerimenti:**\n` +
+                `• Conferma i dettagli della ricarica\n` +
+                `• Chiarisci eventuali dubbi\n` +
+                `• Coordina l'orario se necessario\n\n` +
+                `⚠️ **Ricorda:** Dopo aver chiarito, torna qui per accettare o rifiutare la richiesta.`,
+                { parse_mode: 'Markdown' }
+            );
+        });
+
         // Help callbacks
         this.bot.action('help_selling', async (ctx) => {
             await ctx.answerCbQuery();
