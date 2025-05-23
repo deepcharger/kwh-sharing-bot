@@ -546,8 +546,11 @@ class KwhBot {
                 userStats
             );
             
+            // Replace underscores in the text to avoid Markdown parsing issues
+            const escapedText = detailText.replace(/_/g, '\\_');
+            
             await ctx.editMessageText(
-                `📋 **DETTAGLI ANNUNCIO**\n\n${detailText}`,
+                `📋 **DETTAGLI ANNUNCIO**\n\n${escapedText}`,
                 {
                     parse_mode: 'Markdown',
                     ...Keyboards.getAnnouncementActionsKeyboard(announcementId)
@@ -618,8 +621,11 @@ class KwhBot {
                 userStats
             );
             
+            // Replace underscores in the text to avoid Markdown parsing issues
+            const escapedText = detailText.replace(/_/g, '\\_');
+            
             await ctx.editMessageText(
-                `📋 **DETTAGLI ANNUNCIO**\n\n${detailText}`,
+                `📋 **DETTAGLI ANNUNCIO**\n\n${escapedText}`,
                 {
                     parse_mode: 'Markdown',
                     ...Keyboards.getAnnouncementActionsKeyboard(announcementId)
