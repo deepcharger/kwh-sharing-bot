@@ -9,7 +9,6 @@ const Database = require('./database/Database');
 const UserService = require('./services/UserService');
 const AnnouncementService = require('./services/AnnouncementService');
 const TransactionService = require('./services/TransactionService');
-const ImageProcessor = require('./services/ImageProcessor');
 const Keyboards = require('./utils/Keyboards');
 const Messages = require('./utils/Messages');
 const { createSellAnnouncementScene } = require('./scenes/SellAnnouncementScene');
@@ -26,7 +25,6 @@ class KwhBot {
         this.userService = null;
         this.announcementService = null;
         this.transactionService = null;
-        this.imageProcessor = new ImageProcessor();
         
         // Bot settings
         this.groupId = process.env.GROUP_ID;
@@ -182,8 +180,7 @@ class KwhBot {
                 statsText += `🔄 **Transazioni:**\n`;
                 statsText += `• Totali: ${transactionStats.overall.totalTransactions || 0}\n`;
                 statsText += `• Completate: ${transactionStats.overall.completedTransactions || 0}\n`;
-                statsText += `• KWH totali: ${transactionStats.overall.totalKwh || 0}\n`;
-                statsText += `• Fatturato: €${(transactionStats.overall.totalRevenue || 0).toFixed(2)}\n\n`;
+                statsText += `• KWH totali: ${transactionStats.overall.totalKwh || 0}\n\n`;
             }
             
             if (announcementStats) {
@@ -393,9 +390,7 @@ class KwhBot {
                 statsText += `• Completate: ${transactionStats.overall.completedTransactions || 0}\n`;
                 statsText += `• Tasso successo: ${transactionStats.overall.totalTransactions > 0 ? 
                     ((transactionStats.overall.completedTransactions / transactionStats.overall.totalTransactions) * 100).toFixed(1) : 0}%\n`;
-                statsText += `• KWH totali: ${(transactionStats.overall.totalKwh || 0).toFixed(1)}\n`;
-                statsText += `• Fatturato: €${(transactionStats.overall.totalRevenue || 0).toFixed(2)}\n`;
-                statsText += `• KWH medio/transazione: ${(transactionStats.overall.avgKwhPerTransaction || 0).toFixed(1)}\n\n`;
+                statsText += `• KWH totali: ${(transactionStats.overall.totalKwh || 0).toFixed(1)}\n\n`;
             }
             
             if (announcementStats) {
@@ -1170,10 +1165,8 @@ class KwhBot {
             const completedTx = annTransactions.filter(t => t.status === 'completed');
             if (completedTx.length > 0) {
                 const totalKwh = completedTx.reduce((sum, t) => sum + (t.actualKwh || 0), 0);
-                const totalRevenue = completedTx.reduce((sum, t) => sum + (t.totalAmount || 0), 0);
                 
                 statsText += `⚡ **KWH venduti:** ${totalKwh.toFixed(1)}\n`;
-                statsText += `💰 **Ricavi totali:** €${totalRevenue.toFixed(2)}\n`;
             }
             
             await ctx.editMessageText(statsText, {
@@ -1272,7 +1265,6 @@ class KwhBot {
                 if (stats && stats.overall) {
                     dailyReport += `🔄 Transazioni totali: ${stats.overall.totalTransactions || 0}\n`;
                     dailyReport += `✅ Completate: ${stats.overall.completedTransactions || 0}\n`;
-                    dailyReport += `💰 Fatturato: €${(stats.overall.totalRevenue || 0).toFixed(2)}\n\n`;
                 }
                 
                 if (announcementStats) {
