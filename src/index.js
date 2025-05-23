@@ -641,6 +641,9 @@ class KwhBot {
         // Setup Express server for webhook
         this.app.use(express.json());
         
+        // Trust proxy for Render.com
+        this.app.set('trust proxy', true);
+        
         // Rate limiting
         const limiter = rateLimit({
             windowMs: 1 * 60 * 1000, // 1 minute
