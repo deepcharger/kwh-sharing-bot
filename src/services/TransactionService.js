@@ -27,20 +27,22 @@ class TransactionService {
                 connector: transactionData.connector,
                 
                 // Status tracking
-                status: 'pending_seller_confirmation', // pending_seller_confirmation, confirmed, charging_started, charging_completed, photo_uploaded, payment_requested, payment_confirmed, completed, cancelled, disputed
+                status: 'pending_seller_confirmation',
                 
                 // Dati ricarica effettiva
                 actualKwh: null,
-                totalAmount: null,
+                declaredKwh: null,  // KWH dichiarati dall'acquirente
                 displayPhoto: null,
+                // RIMOSSO: totalAmount e pricePerKwh
                 
-                // Timestampss
+                // Timestamps
                 createdAt: new Date(),
                 updatedAt: new Date(),
                 confirmedAt: null,
                 chargingStartedAt: null,
                 chargingCompletedAt: null,
                 photoUploadedAt: null,
+                kwhDeclaredAt: null,  // NUOVO
                 paymentRequestedAt: null,
                 paymentConfirmedAt: null,
                 completedAt: null,
@@ -83,6 +85,7 @@ class TransactionService {
                 'charging_started': 'chargingStartedAt', 
                 'charging_completed': 'chargingCompletedAt',
                 'photo_uploaded': 'photoUploadedAt',
+                'kwh_declared': 'kwhDeclaredAt',  // NUOVO STATO
                 'payment_requested': 'paymentRequestedAt',
                 'payment_confirmed': 'paymentConfirmedAt',
                 'completed': 'completedAt'
@@ -175,6 +178,7 @@ class TransactionService {
                 'charging_started',
                 'charging_completed',
                 'photo_uploaded',
+                'kwh_declared',
                 'payment_requested'
             ];
 
@@ -185,71 +189,6 @@ class TransactionService {
         } catch (error) {
             console.error('Errore get transazioni pending:', error);
             return [];
-        }
-    }
-
-    async validateKwhFromPhoto(transactionId, declaredKwh, photoData) {
-        try {
-            // Qui implementeremo la validazione OCR della foto
-            // Per ora simuliamo la validazione
-            
-            const tolerance = 0.1; // 10% di tolleranza
-            const minKwh = declaredKwh * (1 - tolerance);
-            const maxKwh = declaredKwh * (1 + tolerance);
-            
-            // TODO: Implementare OCR reale con Tesseract.js
-            // const detectedKwh = await this.extractKwhFromImage(photoData);
-            
-            // Per ora accettiamo sempre (logica placeholder)
-            const isValid = true;
-            const detectedKwh = declaredKwh; // Placeholder
-            
-            await this.transactions.updateOne(
-                { transactionId },
-                {
-                    $set: {
-                        actualKwh: declaredKwh,
-                        detectedKwh: detectedKwh,
-                        photoValidated: isValid,
-                        photoValidatedAt: new Date(),
-                        updatedAt: new Date()
-                    }
-                }
-            );
-
-            return {
-                isValid,
-                declaredKwh,
-                detectedKwh,
-                tolerance
-            };
-
-        } catch (error) {
-            console.error('Errore validazione foto KWH:', error);
-            return { isValid: false, error: error.message };
-        }
-    }
-
-    async calculateTransactionAmount(transactionId, kwhAmount, pricePerKwh) {
-        try {
-            const totalAmount = kwhAmount * pricePerKwh;
-            
-            await this.transactions.updateOne(
-                { transactionId },
-                {
-                    $set: {
-                        actualKwh: kwhAmount,
-                        totalAmount: totalAmount,
-                        pricePerKwh: pricePerKwh,
-                        updatedAt: new Date()
-                    }
-                }
-            );
-
-            return totalAmount;
-        } catch (error) {
-            console.error('Errore calcolo amount transazione:', error);
-            return 0;
         }
     }
 
@@ -283,8 +222,7 @@ class TransactionService {
                     $group: {
                         _id: '$status',
                         count: { $sum: 1 },
-                        totalKwh: { $sum: '$actualKwh' },
-                        totalAmount: { $sum: '$totalAmount' }
+                        totalKwh: { $sum: '$actualKwh' }
                     }
                 }
             ];
@@ -300,9 +238,7 @@ class TransactionService {
                             $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] }
                         },
                         totalKwh: { $sum: '$actualKwh' },
-                        totalRevenue: { $sum: '$totalAmount' },
-                        avgKwhPerTransaction: { $avg: '$actualKwh' },
-                        avgAmountPerTransaction: { $avg: '$totalAmount' }
+                        avgKwhPerTransaction: { $avg: '$actualKwh' }
                     }
                 }
             ];
