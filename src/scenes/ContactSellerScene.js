@@ -68,7 +68,11 @@ function createContactSellerScene(bot) {
 
     scene.action('cancel_purchase', async (ctx) => {
         await ctx.answerCbQuery();
-        await ctx.editMessageText('❌ Acquisto annullato.', Keyboards.MAIN_MENU);
+        await ctx.editMessageText('❌ Acquisto annullato.', { reply_markup: undefined });
+        setTimeout(() => {
+            ctx.deleteMessage().catch(() => {});
+            ctx.reply('Usa il menu per altre operazioni:', Keyboards.MAIN_MENU);
+        }, 1000);
         return ctx.scene.leave();
     });
 
