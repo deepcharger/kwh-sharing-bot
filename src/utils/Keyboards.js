@@ -3,7 +3,7 @@ const { Markup } = require('telegraf');
 class Keyboards {
     static get MAIN_MENU() {
         return Markup.keyboard([
-            ['🔋 Vendi KWH'],
+            ['🔋 Vendi KWH', '📥 Richieste pendenti'],
             ['📊 I miei annunci', '⭐ I miei feedback'],
             ['❓ Aiuto']
         ]).resize().persistent();
