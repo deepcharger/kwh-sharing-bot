@@ -194,18 +194,11 @@ function createContactSellerScene(bot) {
             try {
                 await ctx.telegram.sendMessage(
                     data.sellerId,
-                    requestText,
+                    requestText + `\n\n🔍 ID Transazione: \`${transaction.transactionId}\``,
                     {
                         parse_mode: 'Markdown',
                         ...Keyboards.getSellerConfirmationKeyboard()
                     }
-                );
-
-                // Add transaction ID to the message for seller actions
-                await ctx.telegram.sendMessage(
-                    data.sellerId,
-                    `🔍 ID Transazione: \`${transaction.transactionId}\``,
-                    { parse_mode: 'Markdown' }
                 );
 
             } catch (error) {
