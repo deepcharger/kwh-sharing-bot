@@ -32,6 +32,10 @@ function createContactSellerScene(bot) {
         // Get seller stats
         const userStats = await bot.userService.getUserStats(announcement.userId);
         
+        // Get seller info for username
+        const sellerInfo = await bot.userService.getUser(announcement.userId);
+        announcement.username = sellerInfo?.username || 'utente';
+        
         // Format current type correctly
         const currentTypeTexts = {
             'dc_only': 'SOLO DC',
@@ -44,7 +48,7 @@ function createContactSellerScene(bot) {
         
         // Show announcement summary
         const summaryText = Messages.formatContactSummary(
-            { ...announcement, username: announcement.username || 'utente' },
+            announcement,
             userStats
         );
 
