@@ -32,6 +32,16 @@ function createContactSellerScene(bot) {
         // Get seller stats
         const userStats = await bot.userService.getUserStats(announcement.userId);
         
+        // Format current type correctly
+        const currentTypeTexts = {
+            'dc_only': 'SOLO DC',
+            'ac_only': 'SOLO AC',
+            'both': 'DC E AC',
+            'dc_min_30': 'SOLO DC E MINIMO 30 KW'
+        };
+        
+        announcement.currentTypeText = currentTypeTexts[announcement.currentType] || announcement.currentType || 'Non specificato';
+        
         // Show announcement summary
         const summaryText = Messages.formatContactSummary(
             { ...announcement, username: announcement.username || 'utente' },
