@@ -315,7 +315,10 @@ class KwhBot {
         // Back to main menu
         this.bot.action('back_to_main', async (ctx) => {
             await ctx.answerCbQuery();
-            await ctx.editMessageText(
+            // Delete the inline message
+            await ctx.deleteMessage();
+            // Send new message with reply keyboard
+            await ctx.reply(
                 '🏠 **Menu Principale**\n\nSeleziona un\'opzione:',
                 {
                     parse_mode: 'Markdown',
