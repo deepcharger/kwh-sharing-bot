@@ -119,9 +119,10 @@ class Keyboards {
         ]);
     }
 
+    // FIX PRINCIPALE: Keyboard di conferma pagamento migliorata
     static getPaymentConfirmationKeyboard() {
         return Markup.inlineKeyboard([
-            [Markup.button.callback('✅ Sì, ho pagato', 'payment_completed')],
+            [Markup.button.callback('✅ Sì, ho effettuato il pagamento', 'payment_completed')],
             [Markup.button.callback('❌ Ho problemi con il pagamento', 'payment_issues')],
             [Markup.button.callback('⏰ Sto ancora pagando...', 'payment_in_progress')]
         ]);
@@ -129,8 +130,8 @@ class Keyboards {
 
     static getSellerPaymentConfirmKeyboard() {
         return Markup.inlineKeyboard([
-            [Markup.button.callback('✅ Sì, confermo pagamento ricevuto', 'payment_received')],
-            [Markup.button.callback('❌ No, non ho ricevuto nulla', 'payment_not_received')],
+            [Markup.button.callback('✅ Confermo: pagamento ricevuto', 'payment_received')],
+            [Markup.button.callback('❌ Non ho ricevuto il pagamento', 'payment_not_received')],
             [Markup.button.callback('⚠️ Ricevuto importo diverso', 'payment_amount_different')],
             [Markup.button.callback('⏰ Non ancora, aspetto', 'payment_waiting')]
         ]);
@@ -139,7 +140,7 @@ class Keyboards {
     static getPaymentIssuesKeyboard() {
         return Markup.inlineKeyboard([
             [Markup.button.callback('🔄 Riprovo il pagamento', 'retry_payment')],
-            [Markup.button.callback('📱 Invio screenshot pagamento', 'send_payment_proof')],
+            [Markup.button.callback('📷 Invio screenshot pagamento', 'send_payment_proof')],
             [Markup.button.callback('📞 Contatto admin', 'contact_admin_payment')],
             [Markup.button.callback('💬 Parlo in privato con venditore', 'contact_seller_private')]
         ]);
@@ -258,25 +259,8 @@ class Keyboards {
         return Markup.inlineKeyboard(buttons);
     }
 
-    static getPaymentTransactionsKeyboard(transactions) {
-        const buttons = [];
-        
-        transactions.forEach((tx, index) => {
-            // Usa indice invece dell'ID completo per evitare errore
-            const displayId = tx.transactionId.length > 20 ? 
-                tx.transactionId.substring(2, 17) + '...' : 
-                tx.transactionId;
-                
-            buttons.push([Markup.button.callback(
-                `💳 ${displayId}`, 
-                `pay_tx_${index}` // Usa indice
-            )]);
-        });
-        
-        buttons.push([Markup.button.callback('🏠 Menu principale', 'back_to_main')]);
-        
-        return Markup.inlineKeyboard(buttons);
-    }
+    // FIX: Rimuovo metodo getPaymentTransactionsKeyboard perché non più necessario
+    // Il nuovo sistema identifica automaticamente la transazione
 
     // Metodo helper per creare ID corti (max 10 caratteri)
     static createShortId(fullId) {
@@ -356,6 +340,25 @@ class Keyboards {
             [Markup.button.callback('⚠️ Segnala problema', `report_${shortId}`)],
             [Markup.button.callback('📞 Contatta admin', `admin_help_${shortId}`)]
         ]);
+    }
+
+    // FIX: Nuovo metodo per gestione pagamenti multipli
+    static getMultiplePaymentsKeyboard(transactions) {
+        const buttons = [];
+        
+        transactions.forEach((tx, index) => {
+            const displayId = tx.transactionId.slice(-10);
+            const amount = tx.amount || 'N/A';
+            
+            buttons.push([Markup.button.callback(
+                `💳 ${displayId} - €${amount}`,
+                `select_payment_${tx.transactionId}`
+            )]);
+        });
+        
+        buttons.push([Markup.button.callback('🏠 Menu principale', 'back_to_main')]);
+        
+        return Markup.inlineKeyboard(buttons);
     }
 }
 
