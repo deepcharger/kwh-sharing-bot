@@ -110,10 +110,12 @@ class Keyboards {
     }
 
     static getKwhValidationKeyboard(transactionId) {
+        // Usa un ID corto per evitare il limite di 64 caratteri
+        const shortId = this.createShortId(transactionId);
         return Markup.inlineKeyboard([
-            [Markup.button.callback('✅ Sì, KWH corretti', `kwh_correct_${transactionId}`)],
-            [Markup.button.callback('❌ No, KWH errati', `kwh_incorrect_${transactionId}`)],
-            [Markup.button.callback('📞 Contatta admin', `call_admin_${transactionId}`)]
+            [Markup.button.callback('✅ Sì, KWH corretti', `kwh_ok_${shortId}`)],
+            [Markup.button.callback('❌ No, KWH errati', `kwh_bad_${shortId}`)],
+            [Markup.button.callback('📞 Contatta admin', `admin_${shortId}`)]
         ]);
     }
 
@@ -169,23 +171,28 @@ class Keyboards {
         ]);
     }
 
-    // === NUOVE KEYBOARDS PER GESTIONE TRANSAZIONI ===
+    // === KEYBOARDS PER GESTIONE TRANSAZIONI (FIX BUTTON_DATA_INVALID) ===
 
     static getTransactionsKeyboard(pending, completed) {
         const buttons = [];
         
-        // Add pending transactions first (max 8)
-        pending.slice(0, 8).forEach(tx => {
+        // Add pending transactions first (max 8) - usa indici invece di ID completi
+        pending.slice(0, 8).forEach((tx, index) => {
             const statusText = this.getStatusText(tx.status);
+            // Mostra solo una parte dell'ID per la leggibilità
+            const displayId = tx.transactionId.length > 15 ? 
+                tx.transactionId.substring(2, 12) + '...' : 
+                tx.transactionId;
+                
             buttons.push([Markup.button.callback(
-                `${this.getStatusEmoji(tx.status)} ${tx.transactionId.substring(0, 15)}... - ${statusText}`, 
-                `view_transaction_${tx.transactionId}`
+                `${this.getStatusEmoji(tx.status)} ${displayId} - ${statusText}`, 
+                `view_tx_${index}` // Usa indice invece dell'ID completo
             )]);
         });
         
         // Add recent completed transactions (max 3)
         if (completed.length > 0) {
-            buttons.push([Markup.button.callback('📜 Cronologia completa', 'transaction_history')]);
+            buttons.push([Markup.button.callback('📜 Cronologia completa', 'tx_history')]);
         }
         
         buttons.push([Markup.button.callback('🏠 Menu principale', 'back_to_main')]);
@@ -232,18 +239,21 @@ class Keyboards {
     static getTransactionActionsKeyboard(transactionId, status, isSeller) {
         const buttons = [];
         
+        // Crea un hash corto dell'ID per evitare il limite di 64 caratteri
+        const shortId = this.createShortId(transactionId);
+        
         // Add action button based on status
         if (status === 'payment_requested' && !isSeller) {
-            buttons.push([Markup.button.callback('💳 Gestisci pagamento', `manage_transaction_${transactionId}`)]);
+            buttons.push([Markup.button.callback('💳 Gestisci pagamento', `manage_tx_${shortId}`)]);
         } else if (status === 'pending_seller_confirmation' && isSeller) {
-            buttons.push([Markup.button.callback('✅ Conferma/Rifiuta', `manage_transaction_${transactionId}`)]);
+            buttons.push([Markup.button.callback('✅ Conferma/Rifiuta', `manage_tx_${shortId}`)]);
         } else if (!['completed', 'cancelled'].includes(status)) {
-            buttons.push([Markup.button.callback('⚙️ Gestisci transazione', `manage_transaction_${transactionId}`)]);
+            buttons.push([Markup.button.callback('⚙️ Gestisci transazione', `manage_tx_${shortId}`)]);
         }
         
         // Always add details and back buttons
-        buttons.push([Markup.button.callback('📊 Dettagli completi', `transaction_full_details_${transactionId}`)]);
-        buttons.push([Markup.button.callback('🔙 Torna alle transazioni', 'back_to_transactions')]);
+        buttons.push([Markup.button.callback('📊 Dettagli completi', `details_tx_${shortId}`)]);
+        buttons.push([Markup.button.callback('🔙 Torna alle transazioni', 'back_to_txs')]);
         
         return Markup.inlineKeyboard(buttons);
     }
@@ -251,10 +261,15 @@ class Keyboards {
     static getPaymentTransactionsKeyboard(transactions) {
         const buttons = [];
         
-        transactions.forEach(tx => {
+        transactions.forEach((tx, index) => {
+            // Usa indice invece dell'ID completo per evitare errore
+            const displayId = tx.transactionId.length > 20 ? 
+                tx.transactionId.substring(2, 17) + '...' : 
+                tx.transactionId;
+                
             buttons.push([Markup.button.callback(
-                `💳 ${tx.transactionId.substring(0, 20)}...`, 
-                `manage_transaction_${tx.transactionId}`
+                `💳 ${displayId}`, 
+                `pay_tx_${index}` // Usa indice
             )]);
         });
         
@@ -263,15 +278,27 @@ class Keyboards {
         return Markup.inlineKeyboard(buttons);
     }
 
-    // === FINE NUOVE KEYBOARDS ===
+    // Metodo helper per creare ID corti (max 10 caratteri)
+    static createShortId(fullId) {
+        // Prende solo gli ultimi 10 caratteri dell'ID per rimanere sotto i 64 caratteri
+        // nei callback_data che hanno prefissi come "manage_tx_"
+        return fullId.slice(-10);
+    }
+
+    // === FINE KEYBOARDS TRANSAZIONI ===
 
     static getUserAnnouncementsKeyboard(announcements) {
         const buttons = [];
         
         announcements.slice(0, 10).forEach(ann => {
+            // Usa ID corto anche per gli annunci se necessario
+            const displayId = ann.announcementId.length > 20 ? 
+                ann.announcementId.substring(0, 15) + '...' : 
+                ann.announcementId;
+                
             buttons.push([Markup.button.callback(
-                `📋 ${ann.announcementId} - ${ann.price}€/KWH`, 
-                `view_announcement_${ann.announcementId}`
+                `📋 ${displayId} - ${ann.price}€/KWH`, 
+                `view_ann_${this.createShortId(ann.announcementId)}`
             )]);
         });
 
@@ -281,18 +308,20 @@ class Keyboards {
     }
 
     static getAnnouncementActionsKeyboard(announcementId) {
+        const shortId = this.createShortId(announcementId);
         return Markup.inlineKeyboard([
-            [Markup.button.callback('✏️ Modifica', `edit_ann_${announcementId}`)],
-            [Markup.button.callback('❌ Elimina', `delete_ann_${announcementId}`)],
-            [Markup.button.callback('📊 Statistiche', `stats_ann_${announcementId}`)],
+            [Markup.button.callback('✏️ Modifica', `edit_ann_${shortId}`)],
+            [Markup.button.callback('❌ Elimina', `delete_ann_${shortId}`)],
+            [Markup.button.callback('📊 Statistiche', `stats_ann_${shortId}`)],
             [Markup.button.callback('🔙 Indietro', 'my_announcements')]
         ]);
     }
 
     static getConfirmDeleteKeyboard(announcementId) {
+        const shortId = this.createShortId(announcementId);
         return Markup.inlineKeyboard([
-            [Markup.button.callback('✅ Sì, elimina', `confirm_delete_${announcementId}`)],
-            [Markup.button.callback('❌ No, mantieni', `cancel_delete_${announcementId}`)]
+            [Markup.button.callback('✅ Sì, elimina', `confirm_del_${shortId}`)],
+            [Markup.button.callback('❌ No, mantieni', `cancel_del_${shortId}`)]
         ]);
     }
 
@@ -321,10 +350,11 @@ class Keyboards {
     }
 
     static getTransactionStatusKeyboard(transactionId) {
+        const shortId = this.createShortId(transactionId);
         return Markup.inlineKeyboard([
-            [Markup.button.callback('📊 Dettagli completi', `transaction_details_${transactionId}`)],
-            [Markup.button.callback('⚠️ Segnala problema', `report_issue_${transactionId}`)],
-            [Markup.button.callback('📞 Contatta admin', `admin_help_${transactionId}`)]
+            [Markup.button.callback('📊 Dettagli completi', `tx_details_${shortId}`)],
+            [Markup.button.callback('⚠️ Segnala problema', `report_${shortId}`)],
+            [Markup.button.callback('📞 Contatta admin', `admin_help_${shortId}`)]
         ]);
     }
 }
