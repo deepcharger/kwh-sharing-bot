@@ -1,21 +1,26 @@
 {
   "name": "kwh-sharing-bot",
-  "version": "1.0.0",
-  "description": "Bot Telegram per la gestione di annunci compro/vendo KWH",
+  "version": "2.0.0",
+  "description": "Bot Telegram per la gestione di annunci compro/vendo KWH - Architettura Modulare",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "postinstall": "echo 'Build completed'",
-    "health-check": "node -e \"console.log('Health check passed')\""
+    "postinstall": "echo 'Build completed successfully'",
+    "health-check": "node -e \"console.log('Health check passed')\"",
+    "lint": "eslint src/**/*.js",
+    "lint:fix": "eslint src/**/*.js --fix"
   },
   "keywords": [
     "telegram",
     "bot",
     "kwh",
     "sharing",
-    "mongodb"
+    "mongodb",
+    "electric-vehicle",
+    "charging",
+    "marketplace"
   ],
   "author": "KWH Bot Team",
   "license": "MIT",
@@ -31,10 +36,19 @@
     "express-rate-limit": "^7.1.5"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.2",
+    "eslint": "^8.55.0"
   },
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=9.0.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/kwh-sharing-bot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/kwh-sharing-bot/issues"
+  },
+  "homepage": "https://github.com/your-username/kwh-sharing-bot#readme"
 }
