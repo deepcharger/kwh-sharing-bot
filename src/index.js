@@ -31,12 +31,82 @@ class KwhBot {
         this.topicId = process.env.TOPIC_ID;
         this.adminUserId = process.env.ADMIN_USER_ID;
         
+        // Cache per mappare ID corti a ID completi - FIX BUTTON_DATA_INVALID
+        this.transactionCache = new Map();
+        this.announcementCache = new Map();
+        
         this.init();
     }
 
     // Helper function per escape degli underscore nei transaction ID
     escapeMarkdown(text) {
         return text.replace(/_/g, '\\_');
+    }
+
+    // Helper methods per cache ID - FIX BUTTON_DATA_INVALID
+    cacheTransactionId(shortId, fullId) {
+        this.transactionCache.set(shortId, fullId);
+        // Rimuovi entries vecchie per evitare memory leak
+        if (this.transactionCache.size > 100) {
+            const firstKey = this.transactionCache.keys().next().value;
+            this.transactionCache.delete(firstKey);
+        }
+    }
+
+    getFullTransactionId(shortId) {
+        return this.transactionCache.get(shortId);
+    }
+
+    cacheAnnouncementId(shortId, fullId) {
+        this.announcementCache.set(shortId, fullId);
+        if (this.announcementCache.size > 50) {
+            const firstKey = this.announcementCache.keys().next().value;
+            this.announcementCache.delete(firstKey);
+        }
+    }
+
+    getFullAnnouncementId(shortId) {
+        return this.announcementCache.get(shortId);
+    }
+
+    // Helper method per trovare transazione da ID corto
+    async findTransactionByShortId(shortId, userId) {
+        // Cerca prima nella cache
+        let transactionId = this.getFullTransactionId(shortId);
+        
+        if (transactionId) {
+            return await this.transactionService.getTransaction(transactionId);
+        }
+        
+        // Se non in cache, cerca nel database
+        const allTransactions = await this.transactionService.getUserTransactions(userId, 'all');
+        const transaction = allTransactions.find(t => t.transactionId.endsWith(shortId));
+        
+        if (transaction) {
+            this.cacheTransactionId(shortId, transaction.transactionId);
+            return transaction;
+        }
+        
+        return null;
+    }
+
+    // Helper method per trovare annuncio da ID corto
+    async findAnnouncementByShortId(shortId, userId) {
+        let announcementId = this.getFullAnnouncementId(shortId);
+        
+        if (announcementId) {
+            return await this.announcementService.getAnnouncement(announcementId);
+        }
+        
+        const announcements = await this.announcementService.getUserAnnouncements(userId);
+        const announcement = announcements.find(a => a.announcementId.endsWith(shortId));
+        
+        if (announcement) {
+            this.cacheAnnouncementId(shortId, announcement.announcementId);
+            return announcement;
+        }
+        
+        return null;
     }
 
     // Helper method per status emoji
@@ -400,7 +470,10 @@ class KwhBot {
                 for (const tx of pending.slice(0, 5)) {
                     const statusEmoji = this.getStatusEmoji(tx.status);
                     const statusText = this.getStatusText(tx.status);
-                    message += `${statusEmoji} ${tx.transactionId}\n`;
+                    const displayId = tx.transactionId.length > 15 ? 
+                        tx.transactionId.substring(2, 12) + '...' : 
+                        tx.transactionId;
+                    message += `${statusEmoji} ${displayId}\n`;
                     message += `📊 ${statusText}\n`;
                     message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
                 }
@@ -655,76 +728,74 @@ class KwhBot {
             });
         });
 
-        // Transaction management callbacks - NUOVO
-        this.bot.action(/^view_transaction_(.+)$/, async (ctx) => {
+        // === CALLBACKS TRANSAZIONI - FIX BUTTON_DATA_INVALID ===
+
+        // Transaction management callbacks - AGGIORNATO
+        this.bot.action(/^view_tx_(\d+)$/, async (ctx) => {
             await ctx.answerCbQuery();
-            const transactionId = ctx.match[1];
+            const index = parseInt(ctx.match[1]);
+            const userId = ctx.from.id;
             
-            const transaction = await this.transactionService.getTransaction(transactionId);
+            // Riprendi la lista delle transazioni per ottenere l'ID corretto
+            const allTransactions = await this.transactionService.getUserTransactions(userId, 'all');
+            const pending = allTransactions.filter(t => !['completed', 'cancelled'].includes(t.status));
+            
+            if (index >= pending.length) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            const transaction = pending[index];
+            const announcement = await this.announcementService.getAnnouncement(transaction.announcementId);
+            const detailText = this.formatTransactionDetails(transaction, announcement, userId);
+            
+            // Cache l'ID per future operazioni
+            const shortId = transaction.transactionId.slice(-10);
+            this.cacheTransactionId(shortId, transaction.transactionId);
+            
+            await ctx.editMessageText(detailText, {
+                parse_mode: 'Markdown',
+                ...Keyboards.getTransactionActionsKeyboard(transaction.transactionId, transaction.status, userId === transaction.sellerId)
+            });
+        });
+
+        this.bot.action(/^manage_tx_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const shortId = ctx.match[1];
+            
+            const transaction = await this.findTransactionByShortId(shortId, ctx.from.id);
+            
             if (!transaction) {
                 await ctx.editMessageText('❌ Transazione non trovata.');
                 return;
             }
             
-            // Check authorization
+            ctx.session.transactionId = transaction.transactionId;
+            await ctx.scene.enter('transactionScene');
+        });
+
+        this.bot.action(/^pay_tx_(\d+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const index = parseInt(ctx.match[1]);
             const userId = ctx.from.id;
-            if (transaction.sellerId !== userId && transaction.buyerId !== userId) {
-                await ctx.editMessageText('❌ Non autorizzato.');
+            
+            // Riprendi la lista dei pagamenti pendenti
+            const transactions = await this.transactionService.getUserTransactions(userId, 'all');
+            const paymentPending = transactions.filter(t => 
+                t.status === 'payment_requested' && t.buyerId === userId
+            );
+            
+            if (index >= paymentPending.length) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
                 return;
             }
             
-            // Show transaction details
-            const announcement = await this.announcementService.getAnnouncement(transaction.announcementId);
-            const detailText = this.formatTransactionDetails(transaction, announcement, userId);
-            
-            await ctx.editMessageText(detailText, {
-                parse_mode: 'Markdown',
-                ...Keyboards.getTransactionActionsKeyboard(transactionId, transaction.status, userId === transaction.sellerId)
-            });
-        });
-
-        this.bot.action(/^manage_transaction_(.+)$/, async (ctx) => {
-            await ctx.answerCbQuery();
-            const transactionId = ctx.match[1];
-            
+            const transactionId = paymentPending[index].transactionId;
             ctx.session.transactionId = transactionId;
             await ctx.scene.enter('transactionScene');
         });
 
-        this.bot.action('transaction_history', async (ctx) => {
-            await ctx.answerCbQuery();
-            const userId = ctx.from.id;
-            
-            const transactions = await this.transactionService.getUserTransactions(userId, 'all');
-            const completed = transactions.filter(t => t.status === 'completed');
-            const cancelled = transactions.filter(t => t.status === 'cancelled');
-            
-            let message = '📜 **CRONOLOGIA TRANSAZIONI**\n\n';
-            
-            if (completed.length > 0) {
-                message += `✅ **COMPLETATE (${completed.length}):**\n`;
-                completed.slice(-10).reverse().forEach(tx => {
-                    message += `• ${tx.transactionId}\n`;
-                    message += `  📅 ${tx.completedAt ? tx.completedAt.toLocaleDateString('it-IT') : tx.createdAt.toLocaleDateString('it-IT')}\n`;
-                });
-                message += '\n';
-            }
-            
-            if (cancelled.length > 0) {
-                message += `❌ **ANNULLATE (${cancelled.length}):**\n`;
-                cancelled.slice(-5).reverse().forEach(tx => {
-                    message += `• ${tx.transactionId}\n`;
-                    message += `  📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n`;
-                });
-            }
-            
-            await ctx.editMessageText(message, {
-                parse_mode: 'Markdown',
-                ...Keyboards.getBackToMainMenuKeyboard()
-            });
-        });
-
-        this.bot.action('back_to_transactions', async (ctx) => {
+        this.bot.action('back_to_txs', async (ctx) => {
             await ctx.answerCbQuery();
             // Simulate the "Le mie transazioni" command
             const userId = ctx.from.id;
@@ -740,7 +811,10 @@ class KwhBot {
                 for (const tx of pending.slice(0, 5)) {
                     const statusEmoji = this.getStatusEmoji(tx.status);
                     const statusText = this.getStatusText(tx.status);
-                    message += `${statusEmoji} ${tx.transactionId}\n`;
+                    const displayId = tx.transactionId.length > 15 ? 
+                        tx.transactionId.substring(2, 12) + '...' : 
+                        tx.transactionId;
+                    message += `${statusEmoji} ${displayId}\n`;
                     message += `📊 ${statusText}\n`;
                     message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
                 }
@@ -753,6 +827,224 @@ class KwhBot {
                 ...Keyboards.getTransactionsKeyboard(pending, completed)
             });
         });
+
+        this.bot.action('tx_history', async (ctx) => {
+            await ctx.answerCbQuery();
+            const userId = ctx.from.id;
+            
+            const transactions = await this.transactionService.getUserTransactions(userId, 'all');
+            const completed = transactions.filter(t => t.status === 'completed');
+            const cancelled = transactions.filter(t => t.status === 'cancelled');
+            
+            let message = '📜 **CRONOLOGIA TRANSAZIONI**\n\n';
+            
+            if (completed.length > 0) {
+                message += `✅ **COMPLETATE (${completed.length}):**\n`;
+                completed.slice(-10).reverse().forEach(tx => {
+                    const displayId = tx.transactionId.length > 20 ? 
+                        tx.transactionId.substring(2, 17) + '...' : 
+                        tx.transactionId;
+                    message += `• ${displayId}\n`;
+                    message += `  📅 ${tx.completedAt ? tx.completedAt.toLocaleDateString('it-IT') : tx.createdAt.toLocaleDateString('it-IT')}\n`;
+                });
+                message += '\n';
+            }
+            
+            if (cancelled.length > 0) {
+                message += `❌ **ANNULLATE (${cancelled.length}):**\n`;
+                cancelled.slice(-5).reverse().forEach(tx => {
+                    const displayId = tx.transactionId.length > 20 ? 
+                        tx.transactionId.substring(2, 17) + '...' : 
+                        tx.transactionId;
+                    message += `• ${displayId}\n`;
+                    message += `  📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n`;
+                });
+            }
+            
+            await ctx.editMessageText(message, {
+                parse_mode: 'Markdown',
+                ...Keyboards.getBackToMainMenuKeyboard()
+            });
+        });
+
+        // === CALLBACKS ANNUNCI - FIX BUTTON_DATA_INVALID ===
+
+        this.bot.action(/^view_ann_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const shortId = ctx.match[1];
+            
+            const announcement = await this.findAnnouncementByShortId(shortId, ctx.from.id);
+            if (!announcement) {
+                await ctx.editMessageText('❌ Annuncio non trovato.', { reply_markup: undefined });
+                return;
+            }
+            
+            const userStats = await this.userService.getUserStats(announcement.userId);
+            const detailText = await this.announcementService.formatAnnouncementMessage(
+                { ...announcement, username: ctx.from.username },
+                userStats
+            );
+            
+            // Replace underscores in the text to avoid Markdown parsing issues
+            const escapedText = detailText.replace(/_/g, '\\_');
+            
+            await ctx.editMessageText(
+                `📋 **DETTAGLI ANNUNCIO**\n\n${escapedText}`,
+                {
+                    parse_mode: 'Markdown',
+                    ...Keyboards.getAnnouncementActionsKeyboard(announcement.announcementId)
+                }
+            );
+        });
+
+        this.bot.action(/^delete_ann_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const shortId = ctx.match[1];
+            
+            const announcement = await this.findAnnouncementByShortId(shortId, ctx.from.id);
+            if (!announcement) {
+                await ctx.editMessageText('❌ Annuncio non trovato.');
+                return;
+            }
+            
+            await ctx.editMessageText(
+                '⚠️ **Sei sicuro di voler eliminare questo annuncio?**\n\nQuesta azione è irreversibile.',
+                {
+                    parse_mode: 'Markdown',
+                    ...Keyboards.getConfirmDeleteKeyboard(announcement.announcementId)
+                }
+            );
+        });
+
+        this.bot.action(/^confirm_del_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const shortId = ctx.match[1];
+            
+            const announcement = await this.findAnnouncementByShortId(shortId, ctx.from.id);
+            if (!announcement) {
+                await ctx.editMessageText('❌ Annuncio non trovato.');
+                return;
+            }
+            
+            // Delete from database
+            const deleted = await this.announcementService.deleteAnnouncement(announcement.announcementId, ctx.from.id);
+            
+            if (deleted) {
+                // Try to delete from group
+                if (announcement.messageId) {
+                    try {
+                        await ctx.telegram.deleteMessage(this.groupId, announcement.messageId);
+                    } catch (error) {
+                        console.log('Could not delete announcement from group:', error.description);
+                    }
+                }
+                
+                await ctx.editMessageText('✅ Annuncio eliminato con successo.');
+                setTimeout(() => {
+                    ctx.deleteMessage().catch(() => {});
+                    ctx.reply('Usa il menu per altre operazioni:', Keyboards.MAIN_MENU);
+                }, 2000);
+            } else {
+                await ctx.editMessageText('❌ Errore durante l\'eliminazione.');
+            }
+        });
+
+        this.bot.action(/^cancel_del_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const shortId = ctx.match[1];
+            
+            // Go back to announcement details
+            const announcement = await this.findAnnouncementByShortId(shortId, ctx.from.id);
+            if (!announcement) {
+                await ctx.editMessageText('❌ Annuncio non trovato.');
+                return;
+            }
+            
+            const userStats = await this.userService.getUserStats(announcement.userId);
+            const detailText = await this.announcementService.formatAnnouncementMessage(
+                { ...announcement, username: ctx.from.username },
+                userStats
+            );
+            
+            // Replace underscores in the text to avoid Markdown parsing issues
+            const escapedText = detailText.replace(/_/g, '\\_');
+            
+            await ctx.editMessageText(
+                `📋 **DETTAGLI ANNUNCIO**\n\n${escapedText}`,
+                {
+                    parse_mode: 'Markdown',
+                    ...Keyboards.getAnnouncementActionsKeyboard(announcement.announcementId)
+                }
+            );
+        });
+
+        this.bot.action(/^stats_ann_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const shortId = ctx.match[1];
+            
+            const announcement = await this.findAnnouncementByShortId(shortId, ctx.from.id);
+            if (!announcement) {
+                await ctx.editMessageText('❌ Annuncio non trovato.');
+                return;
+            }
+            
+            // Get announcement transactions
+            const transactions = await this.transactionService.getUserTransactions(ctx.from.id, 'seller');
+            const annTransactions = transactions.filter(t => t.announcementId === announcement.announcementId);
+            
+            let statsText = `📊 **STATISTICHE ANNUNCIO**\n\n`;
+            statsText += `🆔 ID: ${announcement.announcementId}\n\n`;
+            statsText += `📈 **Transazioni:**\n`;
+            statsText += `• Totali: ${annTransactions.length}\n`;
+            statsText += `• Completate: ${annTransactions.filter(t => t.status === 'completed').length}\n`;
+            statsText += `• In corso: ${annTransactions.filter(t => !['completed', 'cancelled'].includes(t.status)).length}\n`;
+            statsText += `• Annullate: ${annTransactions.filter(t => t.status === 'cancelled').length}\n\n`;
+            
+            const completedTx = annTransactions.filter(t => t.status === 'completed');
+            if (completedTx.length > 0) {
+                const totalKwh = completedTx.reduce((sum, t) => sum + (t.actualKwh || 0), 0);
+                
+                statsText += `⚡ **KWH venduti:** ${totalKwh.toFixed(1)}\n`;
+            }
+            
+            await ctx.editMessageText(statsText, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[
+                        { text: '🔙 Indietro', callback_data: `view_ann_${shortId}` }
+                    ]]
+                }
+            });
+        });
+
+        this.bot.action('my_announcements', async (ctx) => {
+            await ctx.answerCbQuery();
+            const userId = ctx.from.id;
+            const announcements = await this.announcementService.getUserAnnouncements(userId);
+            
+            if (announcements.length === 0) {
+                await ctx.editMessageText('📭 Non hai ancora pubblicato annunci.');
+                setTimeout(() => {
+                    ctx.deleteMessage().catch(() => {});
+                    ctx.reply('Usa il menu per pubblicare un annuncio:', Keyboards.MAIN_MENU);
+                }, 2000);
+                return;
+            }
+
+            let message = '📊 <b>I TUOI ANNUNCI ATTIVI:</b>\n\n';
+            for (const ann of announcements) {
+                message += `🆔 ${ann.announcementId}\n`;
+                message += `💰 ${ann.price}€/KWH\n`;
+                message += `📅 Pubblicato: ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
+            }
+            
+            await ctx.editMessageText(message, {
+                parse_mode: 'HTML',
+                ...Keyboards.getUserAnnouncementsKeyboard(announcements)
+            });
+        });
+
+        // === CALLBACKS ESISTENTI ===
 
         // Back to main menu - FIXED
         this.bot.action('back_to_main', async (ctx) => {
@@ -1358,170 +1650,6 @@ class KwhBot {
             await ctx.editMessageText(message, {
                 parse_mode: 'Markdown',
                 ...Keyboards.getBackToMainMenuKeyboard()
-            });
-        });
-
-        // Announcement management callbacks
-        this.bot.action(/^view_announcement_(.+)$/, async (ctx) => {
-            await ctx.answerCbQuery();
-            const announcementId = ctx.match[1];
-            
-            const announcement = await this.announcementService.getAnnouncement(announcementId);
-            if (!announcement) {
-                await ctx.editMessageText('❌ Annuncio non trovato.', { reply_markup: undefined });
-                return;
-            }
-            
-            const userStats = await this.userService.getUserStats(announcement.userId);
-            const detailText = await this.announcementService.formatAnnouncementMessage(
-                { ...announcement, username: ctx.from.username },
-                userStats
-            );
-            
-            // Replace underscores in the text to avoid Markdown parsing issues
-            const escapedText = detailText.replace(/_/g, '\\_');
-            
-            await ctx.editMessageText(
-                `📋 **DETTAGLI ANNUNCIO**\n\n${escapedText}`,
-                {
-                    parse_mode: 'Markdown',
-                    ...Keyboards.getAnnouncementActionsKeyboard(announcementId)
-                }
-            );
-        });
-
-        this.bot.action(/^delete_ann_(.+)$/, async (ctx) => {
-            await ctx.answerCbQuery();
-            const announcementId = ctx.match[1];
-            
-            await ctx.editMessageText(
-                '⚠️ **Sei sicuro di voler eliminare questo annuncio?**\n\nQuesta azione è irreversibile.',
-                {
-                    parse_mode: 'Markdown',
-                    ...Keyboards.getConfirmDeleteKeyboard(announcementId)
-                }
-            );
-        });
-
-        this.bot.action(/^confirm_delete_(.+)$/, async (ctx) => {
-            await ctx.answerCbQuery();
-            const announcementId = ctx.match[1];
-            
-            const announcement = await this.announcementService.getAnnouncement(announcementId);
-            if (!announcement) {
-                await ctx.editMessageText('❌ Annuncio non trovato.');
-                return;
-            }
-            
-            // Delete from database
-            const deleted = await this.announcementService.deleteAnnouncement(announcementId, ctx.from.id);
-            
-            if (deleted) {
-                // Try to delete from group
-                if (announcement.messageId) {
-                    try {
-                        await ctx.telegram.deleteMessage(this.groupId, announcement.messageId);
-                    } catch (error) {
-                        console.log('Could not delete announcement from group:', error.description);
-                    }
-                }
-                
-                await ctx.editMessageText('✅ Annuncio eliminato con successo.');
-                setTimeout(() => {
-                    ctx.deleteMessage().catch(() => {});
-                    ctx.reply('Usa il menu per altre operazioni:', Keyboards.MAIN_MENU);
-                }, 2000);
-            } else {
-                await ctx.editMessageText('❌ Errore durante l\'eliminazione.');
-            }
-        });
-
-        this.bot.action(/^cancel_delete_(.+)$/, async (ctx) => {
-            await ctx.answerCbQuery();
-            const announcementId = ctx.match[1];
-            
-            // Go back to announcement details
-            const announcement = await this.announcementService.getAnnouncement(announcementId);
-            if (!announcement) {
-                await ctx.editMessageText('❌ Annuncio non trovato.');
-                return;
-            }
-            
-            const userStats = await this.userService.getUserStats(announcement.userId);
-            const detailText = await this.announcementService.formatAnnouncementMessage(
-                { ...announcement, username: ctx.from.username },
-                userStats
-            );
-            
-            // Replace underscores in the text to avoid Markdown parsing issues
-            const escapedText = detailText.replace(/_/g, '\\_');
-            
-            await ctx.editMessageText(
-                `📋 **DETTAGLI ANNUNCIO**\n\n${escapedText}`,
-                {
-                    parse_mode: 'Markdown',
-                    ...Keyboards.getAnnouncementActionsKeyboard(announcementId)
-                }
-            );
-        });
-
-        this.bot.action(/^stats_ann_(.+)$/, async (ctx) => {
-            await ctx.answerCbQuery();
-            const announcementId = ctx.match[1];
-            
-            // Get announcement transactions
-            const transactions = await this.transactionService.getUserTransactions(ctx.from.id, 'seller');
-            const annTransactions = transactions.filter(t => t.announcementId === announcementId);
-            
-            let statsText = `📊 **STATISTICHE ANNUNCIO**\n\n`;
-            statsText += `🆔 ID: ${announcementId}\n\n`;
-            statsText += `📈 **Transazioni:**\n`;
-            statsText += `• Totali: ${annTransactions.length}\n`;
-            statsText += `• Completate: ${annTransactions.filter(t => t.status === 'completed').length}\n`;
-            statsText += `• In corso: ${annTransactions.filter(t => !['completed', 'cancelled'].includes(t.status)).length}\n`;
-            statsText += `• Annullate: ${annTransactions.filter(t => t.status === 'cancelled').length}\n\n`;
-            
-            const completedTx = annTransactions.filter(t => t.status === 'completed');
-            if (completedTx.length > 0) {
-                const totalKwh = completedTx.reduce((sum, t) => sum + (t.actualKwh || 0), 0);
-                
-                statsText += `⚡ **KWH venduti:** ${totalKwh.toFixed(1)}\n`;
-            }
-            
-            await ctx.editMessageText(statsText, {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [[
-                        { text: '🔙 Indietro', callback_data: `view_announcement_${announcementId}` }
-                    ]]
-                }
-            });
-        });
-
-        this.bot.action('my_announcements', async (ctx) => {
-            await ctx.answerCbQuery();
-            const userId = ctx.from.id;
-            const announcements = await this.announcementService.getUserAnnouncements(userId);
-            
-            if (announcements.length === 0) {
-                await ctx.editMessageText('📭 Non hai ancora pubblicato annunci.');
-                setTimeout(() => {
-                    ctx.deleteMessage().catch(() => {});
-                    ctx.reply('Usa il menu per pubblicare un annuncio:', Keyboards.MAIN_MENU);
-                }, 2000);
-                return;
-            }
-
-            let message = '📊 <b>I TUOI ANNUNCI ATTIVI:</b>\n\n';
-            for (const ann of announcements) {
-                message += `🆔 ${ann.announcementId}\n`;
-                message += `💰 ${ann.price}€/KWH\n`;
-                message += `📅 Pubblicato: ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
-            }
-            
-            await ctx.editMessageText(message, {
-                parse_mode: 'HTML',
-                ...Keyboards.getUserAnnouncementsKeyboard(announcements)
             });
         });
     }
