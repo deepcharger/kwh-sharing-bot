@@ -16,7 +16,7 @@ class CallbackHandler {
         // Transaction management callbacks
         this.setupTransactionCallbacks();
         
-        // Payment callbacks
+        // Payment callbacks - FIX PRINCIPALE
         this.setupPaymentCallbacks();
         
         // Announcement callbacks
@@ -191,46 +191,7 @@ class CallbackHandler {
             );
         });
 
-        this.bot.bot.action('back_to_payments', async (ctx) => {
-            await ctx.answerCbQuery();
-            
-            delete ctx.session.waitingForTransactionId;
-            delete ctx.session.pendingPaymentConfirmation;
-            
-            const userId = ctx.from.id;
-            const transactions = await this.bot.transactionService.getUserTransactions(userId, 'all');
-            const paymentPending = transactions.filter(t => 
-                t.status === 'payment_requested' && t.buyerId === userId
-            );
-            
-            if (paymentPending.length === 0) {
-                await ctx.editMessageText('✅ Non hai pagamenti in sospeso.');
-                setTimeout(() => {
-                    ctx.reply('Usa il menu principale:', Keyboards.MAIN_MENU);
-                }, 1000);
-                return;
-            }
-            
-            let message = '💳 **PAGAMENTI IN SOSPESO**\n\n';
-            
-            for (const [index, tx] of paymentPending.entries()) {
-                const announcement = await this.bot.announcementService.getAnnouncement(tx.announcementId);
-                const amount = announcement && tx.declaredKwh ? 
-                    (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
-                
-                message += `💰 €${amount} (${tx.declaredKwh || 'N/A'} KWH × ${announcement?.price || '?'}€)\n`;
-                message += `🆔 \`${tx.transactionId}\`\n`;
-                message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n`;
-                message += `💳 Metodi: ${announcement?.paymentMethods || 'Come concordato'}\n\n`;
-            }
-            
-            message += 'Seleziona una transazione per gestire il pagamento:';
-            
-            await ctx.editMessageText(message, {
-                parse_mode: 'Markdown',
-                ...Keyboards.getPaymentTransactionsKeyboard(paymentPending)
-            });
-        });
+        // FIX: Rimosso callback back_to_payments ridondante
 
         this.bot.bot.action('back_to_txs', async (ctx) => {
             await ctx.answerCbQuery();
@@ -490,71 +451,66 @@ class CallbackHandler {
     }
 
     setupPaymentCallbacks() {
-        this.bot.bot.action(/^pay_tx_(\d+)$/, async (ctx) => {
-            await ctx.answerCbQuery();
-            const index = parseInt(ctx.match[1]);
-            const userId = ctx.from.id;
-            
-            const transactions = await this.bot.transactionService.getUserTransactions(userId, 'all');
-            const paymentPending = transactions.filter(t => 
-                t.status === 'payment_requested' && t.buyerId === userId
-            );
-            
-            if (index >= paymentPending.length) {
-                await ctx.editMessageText('❌ Transazione non trovata.');
-                return;
-            }
-            
-            const transaction = paymentPending[index];
-            const announcement = await this.bot.announcementService.getAnnouncement(transaction.announcementId);
-            
-            const amount = announcement && transaction.declaredKwh ? 
-                (transaction.declaredKwh * announcement.price).toFixed(2) : 'N/A';
-            
-            ctx.session.currentTransactionId = transaction.transactionId;
-            
-            await ctx.editMessageText(
-                `💳 **PROCEDI CON IL PAGAMENTO**\n\n` +
-                `🆔 Transazione: \`${transaction.transactionId}\`\n` +
-                `⚡ KWH confermati: ${transaction.declaredKwh || 'N/A'}\n` +
-                `💰 Importo: €${amount}\n` +
-                `💳 Metodi accettati: ${announcement?.paymentMethods || 'Come concordato'}\n\n` +
-                `Una volta effettuato il pagamento, premi il pulsante per confermare.`,
-                {
-                    parse_mode: 'Markdown',
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: '✅ Sì, ho pagato', callback_data: 'payment_completed' }],
-                            [{ text: '❌ Ho problemi con il pagamento', callback_data: 'payment_issues' }],
-                            [{ text: '🔙 Indietro ai pagamenti', callback_data: 'back_to_payments' }]
-                        ]
-                    }
-                }
-            );
-        });
-
+        // FIX PRINCIPALE: Nuovo sistema di pagamento senza inserimento manuale ID
         this.bot.bot.action('payment_completed', async (ctx) => {
             await ctx.answerCbQuery();
             
-            let transactionId = ctx.session.currentTransactionId;
+            // Prova a estrarre l'ID transazione dal messaggio corrente
+            const messageText = ctx.callbackQuery.message.text || '';
+            let transactionId = null;
             
+            // Cerca l'ID nel testo del messaggio
+            const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s\n]+)`?/);
+            if (transactionIdMatch) {
+                transactionId = transactionIdMatch[1];
+            }
+            
+            // Se non trovato nel messaggio, cerca nella sessione
+            if (!transactionId && ctx.session.currentTransactionId) {
+                transactionId = ctx.session.currentTransactionId;
+            }
+            
+            // Se ancora non trovato, cerca nei messaggi precedenti della conversazione
             if (!transactionId) {
-                const messageText = ctx.callbackQuery.message.text || '';
-                const transactionIdMatch = messageText.match(/Transazione: `?([^`\s\n]+)`?/);
-                if (transactionIdMatch) {
-                    transactionId = transactionIdMatch[1];
+                // Cerca nelle transazioni dell'utente in stato payment_requested
+                const userId = ctx.from.id;
+                const transactions = await this.bot.transactionService.getUserTransactions(userId, 'all');
+                const paymentPending = transactions.filter(t => 
+                    t.status === 'payment_requested' && t.buyerId === userId
+                );
+                
+                if (paymentPending.length === 1) {
+                    // Se c'è solo una transazione in attesa di pagamento, usa quella
+                    transactionId = paymentPending[0].transactionId;
+                } else if (paymentPending.length > 1) {
+                    // Se ci sono più transazioni, mostra una lista per scegliere
+                    await ctx.editMessageText(
+                        '💳 **HAI PIÙ PAGAMENTI IN SOSPESO**\n\n' +
+                        'Seleziona la transazione per cui hai effettuato il pagamento:',
+                        {
+                            parse_mode: 'Markdown',
+                            reply_markup: {
+                                inline_keyboard: paymentPending.map((tx, index) => [{
+                                    text: `💰 ${tx.transactionId.slice(-10)} - ${tx.declaredKwh || '?'} KWH`,
+                                    callback_data: `confirm_payment_${tx.transactionId}`
+                                }])
+                            }
+                        }
+                    );
+                    return;
                 }
             }
             
             if (!transactionId) {
                 await ctx.editMessageText(
-                    '❌ **Errore: ID transazione non trovato**\n\n' +
-                    'Torna al menu dei pagamenti e riprova.',
+                    '❌ **Errore: transazione non identificata**\n\n' +
+                    'Non riesco a trovare la transazione per cui confermare il pagamento.\n' +
+                    'Contatta il venditore direttamente per risolvere.',
                     {
                         parse_mode: 'Markdown',
                         reply_markup: {
                             inline_keyboard: [[
-                                { text: '🔙 Torna ai pagamenti', callback_data: 'back_to_payments' }
+                                { text: '🏠 Menu principale', callback_data: 'back_to_main' }
                             ]]
                         }
                     }
@@ -562,6 +518,13 @@ class CallbackHandler {
                 return;
             }
             
+            await this.processPaymentConfirmation(ctx, transactionId);
+        });
+
+        // FIX: Nuovo callback per conferma pagamento specifico
+        this.bot.bot.action(/^confirm_payment_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const transactionId = ctx.match[1];
             await this.processPaymentConfirmation(ctx, transactionId);
         });
 
@@ -1157,6 +1120,9 @@ class CallbackHandler {
                     }
                 );
 
+                // FIX: Salva l'ID transazione nella sessione per il pagamento
+                ctx.session.currentTransactionId = transaction.transactionId;
+
             } catch (error) {
                 console.error('Error notifying buyer:', error);
             }
@@ -1344,7 +1310,7 @@ class CallbackHandler {
         });
     }
 
-    // Helper method for payment confirmation processing
+    // Helper method for payment confirmation processing - FIX PRINCIPALE
     async processPaymentConfirmation(ctx, transactionId) {
         const transaction = await this.bot.transactionService.getTransaction(transactionId);
         
