@@ -34,6 +34,11 @@ class KwhBot {
         this.init();
     }
 
+    // Helper function per escape degli underscore nei transaction ID
+    escapeMarkdown(text) {
+        return text.replace(/_/g, '\\_');
+    }
+
     async init() {
         try {
             // Initialize database
@@ -582,7 +587,7 @@ class KwhBot {
             
             // Extract transaction ID from message
             const messageText = ctx.callbackQuery.message.text;
-            const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
+            const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
             
             if (!transactionIdMatch) {
                 await ctx.reply('❌ ID transazione non trovato.');
@@ -635,7 +640,7 @@ class KwhBot {
             await ctx.answerCbQuery();
             
             const messageText = ctx.callbackQuery.message.text;
-            const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
+            const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
             const transactionId = transactionIdMatch ? transactionIdMatch[1] : null;
             
             setTimeout(async () => {
@@ -670,7 +675,7 @@ class KwhBot {
             await ctx.answerCbQuery();
             
             const messageText = ctx.callbackQuery.message.text;
-            const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
+            const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
             const transactionId = transactionIdMatch ? transactionIdMatch[1] : null;
             
             const keyboard = {
@@ -802,7 +807,7 @@ class KwhBot {
             
             // Need to get transaction from message context
             const messageText = ctx.callbackQuery.message.text;
-            const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
+            const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
             
             if (!transactionIdMatch) {
                 // Try to get from previous message in conversation
@@ -820,7 +825,7 @@ class KwhBot {
             await ctx.answerCbQuery();
             
             const messageText = ctx.callbackQuery.message.text;
-            const transactionIdMatch = messageText.match(/ID Transazione: `?(T_[^`\s]+)`?/);
+            const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
             
             if (!transactionIdMatch) {
                 await ctx.reply('⚠️ ID transazione non trovato.');
