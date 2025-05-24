@@ -4,8 +4,8 @@ class Keyboards {
     static get MAIN_MENU() {
         return Markup.keyboard([
             ['🔋 Vendi KWH', '📥 Richieste pendenti'],
-            ['📊 I miei annunci', '⭐ I miei feedback'],
-            ['❓ Aiuto']
+            ['📊 I miei annunci', '💼 Le mie transazioni'],
+            ['⭐ I miei feedback', '❓ Aiuto']
         ]).resize().persistent();
     }
 
@@ -168,6 +168,102 @@ class Keyboards {
             [Markup.button.callback('🏠 Torna al menu principale', 'back_to_main')]
         ]);
     }
+
+    // === NUOVE KEYBOARDS PER GESTIONE TRANSAZIONI ===
+
+    static getTransactionsKeyboard(pending, completed) {
+        const buttons = [];
+        
+        // Add pending transactions first (max 8)
+        pending.slice(0, 8).forEach(tx => {
+            const statusText = this.getStatusText(tx.status);
+            buttons.push([Markup.button.callback(
+                `${this.getStatusEmoji(tx.status)} ${tx.transactionId.substring(0, 15)}... - ${statusText}`, 
+                `view_transaction_${tx.transactionId}`
+            )]);
+        });
+        
+        // Add recent completed transactions (max 3)
+        if (completed.length > 0) {
+            buttons.push([Markup.button.callback('📜 Cronologia completa', 'transaction_history')]);
+        }
+        
+        buttons.push([Markup.button.callback('🏠 Menu principale', 'back_to_main')]);
+        
+        return Markup.inlineKeyboard(buttons);
+    }
+
+    static getStatusEmoji(status) {
+        const statusEmojis = {
+            'pending_seller_confirmation': '⏳',
+            'confirmed': '✅',
+            'charging_started': '⚡',
+            'charging_in_progress': '🔋',
+            'charging_completed': '🏁',
+            'photo_uploaded': '📷',
+            'kwh_declared': '📊',
+            'payment_requested': '💳',
+            'payment_confirmed': '💰',
+            'completed': '✅',
+            'cancelled': '❌',
+            'disputed': '⚠️'
+        };
+        return statusEmojis[status] || '❓';
+    }
+
+    static getStatusText(status) {
+        const statusTexts = {
+            'pending_seller_confirmation': 'Attesa conferma',
+            'confirmed': 'Confermata',
+            'charging_started': 'Ricarica avviata',
+            'charging_in_progress': 'In ricarica',
+            'charging_completed': 'Ricarica completata',
+            'photo_uploaded': 'Foto caricata',
+            'kwh_declared': 'KWH dichiarati',
+            'payment_requested': 'Pagamento richiesto',
+            'payment_confirmed': 'Pagamento confermato',
+            'completed': 'Completata',
+            'cancelled': 'Annullata',
+            'disputed': 'In disputa'
+        };
+        return statusTexts[status] || status;
+    }
+
+    static getTransactionActionsKeyboard(transactionId, status, isSeller) {
+        const buttons = [];
+        
+        // Add action button based on status
+        if (status === 'payment_requested' && !isSeller) {
+            buttons.push([Markup.button.callback('💳 Gestisci pagamento', `manage_transaction_${transactionId}`)]);
+        } else if (status === 'pending_seller_confirmation' && isSeller) {
+            buttons.push([Markup.button.callback('✅ Conferma/Rifiuta', `manage_transaction_${transactionId}`)]);
+        } else if (!['completed', 'cancelled'].includes(status)) {
+            buttons.push([Markup.button.callback('⚙️ Gestisci transazione', `manage_transaction_${transactionId}`)]);
+        }
+        
+        // Always add details and back buttons
+        buttons.push([Markup.button.callback('📊 Dettagli completi', `transaction_full_details_${transactionId}`)]);
+        buttons.push([Markup.button.callback('🔙 Torna alle transazioni', 'back_to_transactions')]);
+        
+        return Markup.inlineKeyboard(buttons);
+    }
+
+    static getPaymentTransactionsKeyboard(transactions) {
+        const buttons = [];
+        
+        transactions.forEach(tx => {
+            buttons.push([Markup.button.callback(
+                `💳 ${tx.transactionId.substring(0, 20)}...`, 
+                `manage_transaction_${tx.transactionId}`
+            )]);
+        });
+        
+        buttons.push([Markup.button.callback('🏠 Menu principale', 'back_to_main')]);
+        
+        return Markup.inlineKeyboard(buttons);
+    }
+
+    // === FINE NUOVE KEYBOARDS ===
 
     static getUserAnnouncementsKeyboard(announcements) {
         const buttons = [];
