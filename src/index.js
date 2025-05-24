@@ -384,7 +384,7 @@ class KwhBot {
             await ctx.scene.enter('transactionScene');
         });
 
-        // Quick payments access - NUOVO
+        // Quick payments access - MIGLIORATO
         this.bot.command('pagamenti', async (ctx) => {
             const userId = ctx.from.id;
             
@@ -401,13 +401,18 @@ class KwhBot {
             
             let message = '💳 **PAGAMENTI IN SOSPESO**\n\n';
             
-            for (const tx of paymentPending) {
+            for (const [index, tx] of paymentPending.entries()) {
                 const announcement = await this.announcementService.getAnnouncement(tx.announcementId);
-                const amount = announcement ? (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                const amount = announcement && tx.declaredKwh ? 
+                    (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
                 
                 message += `🆔 ${tx.transactionId}\n`;
-                message += `💰 €${amount} (${tx.declaredKwh} KWH × ${announcement?.price || 'N/A'}€)\n`;
-                message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
+                message += `💰 €${amount}`;
+                if (announcement && tx.declaredKwh) {
+                    message += ` (${tx.declaredKwh} KWH × ${announcement.price}€)`;
+                }
+                message += `\n📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n`;
+                message += `💳 Metodi: ${announcement?.paymentMethods || 'Come concordato'}\n\n`;
             }
             
             message += 'Seleziona una transazione per gestire il pagamento:';
@@ -615,8 +620,62 @@ class KwhBot {
             await ctx.scene.enter('transactionScene');
         });
 
-        // Handler per gestire il testo dopo richiesta di motivo rifiuto
+        // Handler per gestire il testo - MIGLIORATO CON FIX PAGAMENTI
         this.bot.on('text', async (ctx, next) => {
+            // Check if we're waiting for transaction ID
+            if (ctx.session?.waitingForTransactionId) {
+                const transactionId = ctx.message.text.trim();
+                const transaction = await this.transactionService.getTransaction(transactionId);
+                
+                if (!transaction) {
+                    await ctx.reply('❌ Transazione non trovata. Verifica l\'ID e riprova.');
+                    return;
+                }
+                
+                // Check if user is buyer
+                if (transaction.buyerId !== ctx.from.id) {
+                    await ctx.reply('❌ Non sei autorizzato per questa transazione.');
+                    return;
+                }
+                
+                // Clear flag and process payment
+                delete ctx.session.waitingForTransactionId;
+                ctx.session.currentTransactionId = transactionId;
+                
+                // Get announcement for amount calculation
+                const announcement = await this.announcementService.getAnnouncement(transaction.announcementId);
+                const amount = announcement && transaction.declaredKwh ? 
+                    (transaction.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                
+                // Notify seller to confirm payment
+                try {
+                    await ctx.telegram.sendMessage(
+                        transaction.sellerId,
+                        `💳 *DICHIARAZIONE PAGAMENTO*\n\n` +
+                        `L'acquirente @${ctx.from.username || ctx.from.first_name} dichiara di aver pagato.\n\n` +
+                        `💰 Importo dichiarato: €${amount}\n` +
+                        `⚡ KWH forniti: ${transaction.declaredKwh || 'N/A'}\n` +
+                        `🔍 ID Transazione: \`${transactionId}\`\n\n` +
+                        `Hai ricevuto il pagamento?`,
+                        {
+                            parse_mode: 'Markdown',
+                            ...Keyboards.getSellerPaymentConfirmKeyboard()
+                        }
+                    );
+                    
+                } catch (error) {
+                    console.error('Error notifying seller:', error);
+                }
+
+                await ctx.reply(
+                    '✅ *Dichiarazione di pagamento inviata!*\n\n' +
+                    'Il venditore riceverà una notifica e dovrà confermare la ricezione del pagamento.',
+                    { parse_mode: 'Markdown' }
+                );
+                
+                return; // Don't call next()
+            }
+            
             // Check if we're waiting for rejection reason
             if (ctx.session?.waitingForRejectionReason && ctx.session?.rejectingTransactionId) {
                 const reason = ctx.message.text;
@@ -662,7 +721,7 @@ class KwhBot {
                 return; // Don't call next()
             }
             
-            // Continue to next handler if not handling rejection
+            // Continue to next handler if not handling anything special
             return next();
         });
     }
@@ -790,9 +849,28 @@ class KwhBot {
                 return;
             }
             
-            const transactionId = paymentPending[index].transactionId;
-            ctx.session.transactionId = transactionId;
-            await ctx.scene.enter('transactionScene');
+            const transaction = paymentPending[index];
+            const announcement = await this.announcementService.getAnnouncement(transaction.announcementId);
+            
+            // Mostra schermata di pagamento
+            const amount = announcement && transaction.declaredKwh ? 
+                (transaction.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+            
+            await ctx.editMessageText(
+                `💳 **PROCEDI CON IL PAGAMENTO**\n\n` +
+                `🆔 ID: \`${transaction.transactionId}\`\n` +
+                `⚡ KWH confermati: ${transaction.declaredKwh || 'N/A'}\n` +
+                `💰 Importo: €${amount}\n` +
+                `💳 Metodi accettati: ${announcement?.paymentMethods || 'Come concordato'}\n\n` +
+                `Una volta effettuato il pagamento, premi il pulsante per confermare.`,
+                {
+                    parse_mode: 'Markdown',
+                    ...Keyboards.getPaymentConfirmationKeyboard()
+                }
+            );
+            
+            // Store transaction ID for payment confirmation
+            ctx.session.currentTransactionId = transaction.transactionId;
         });
 
         this.bot.action('back_to_txs', async (ctx) => {
@@ -865,6 +943,301 @@ class KwhBot {
                 parse_mode: 'Markdown',
                 ...Keyboards.getBackToMainMenuKeyboard()
             });
+        });
+
+        // === CALLBACKS PAGAMENTI - FIX COMPLETO ===
+
+        // KWH validation callbacks (for seller) - AGGIORNATI
+        this.bot.action(/^kwh_ok_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const shortId = ctx.match[1];
+            
+            const transaction = await this.findTransactionByShortId(shortId, ctx.from.id);
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+
+            // Update status to payment requested
+            await this.transactionService.updateTransactionStatus(
+                transaction.transactionId,
+                'payment_requested'
+            );
+
+            // Get announcement for payment details
+            const announcement = await this.announcementService.getAnnouncement(transaction.announcementId);
+
+            // Notify buyer
+            try {
+                const amount = announcement && transaction.declaredKwh ? 
+                    (transaction.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                
+                await ctx.telegram.sendMessage(
+                    transaction.buyerId,
+                    `✅ *KWH CONFERMATI DAL VENDITORE*\n\n` +
+                    `Il venditore ha confermato la ricezione di ${transaction.declaredKwh || 'N/A'} KWH.\n\n` +
+                    `💳 *Procedi con il pagamento*\n` +
+                    `💰 Importo: €${amount}\n` +
+                    `💳 Metodi accettati: ${announcement?.paymentMethods || 'Come concordato'}\n\n` +
+                    `Una volta effettuato il pagamento, premi il pulsante qui sotto.\n\n` +
+                    `🔍 ID Transazione: \`${transaction.transactionId}\``,
+                    {
+                        parse_mode: 'Markdown',
+                        ...Keyboards.getPaymentConfirmationKeyboard()
+                    }
+                );
+
+            } catch (error) {
+                console.error('Error notifying buyer:', error);
+            }
+
+            await ctx.editMessageText(
+                '✅ KWH confermati! L\'acquirente è stato invitato a procedere con il pagamento.',
+                { reply_markup: undefined }
+            );
+        });
+
+        this.bot.action(/^kwh_bad_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const shortId = ctx.match[1];
+            
+            await ctx.editMessageText(
+                '📝 *KWH non corretti*\n\n' +
+                'Specifica il problema:\n' +
+                '• Quanti KWH mostra realmente la foto?\n' +
+                '• Qual è il problema riscontrato?',
+                { parse_mode: 'Markdown' }
+            );
+            
+            ctx.session.disputingKwh = true;
+            ctx.session.disputeTransactionId = shortId;
+            ctx.session.waitingFor = 'kwh_dispute_reason';
+        });
+
+        // Payment confirmation actions - FIXED
+        this.bot.action('payment_completed', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            // Get transaction ID from session or message
+            let transactionId = ctx.session.currentTransactionId;
+            
+            // If not in session, try to get from the current message thread
+            if (!transactionId) {
+                const messageText = ctx.callbackQuery.message.text || '';
+                const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
+                
+                if (transactionIdMatch) {
+                    transactionId = transactionIdMatch[1];
+                }
+            }
+            
+            if (!transactionId) {
+                await ctx.editMessageText(
+                    '⚠️ *ID transazione non trovato*\n\n' +
+                    'Per confermare il pagamento, rispondi con l\'ID della transazione.',
+                    { parse_mode: 'Markdown' }
+                );
+                ctx.session.waitingForTransactionId = true;
+                return;
+            }
+            
+            const transaction = await this.transactionService.getTransaction(transactionId);
+            
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            // Get announcement for amount calculation
+            const announcement = await this.announcementService.getAnnouncement(transaction.announcementId);
+            const amount = announcement && transaction.declaredKwh ? 
+                (transaction.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+            
+            // Notify seller to confirm payment
+            try {
+                await ctx.telegram.sendMessage(
+                    transaction.sellerId,
+                    `💳 *DICHIARAZIONE PAGAMENTO*\n\n` +
+                    `L'acquirente @${ctx.from.username || ctx.from.first_name} dichiara di aver pagato.\n\n` +
+                    `💰 Importo dichiarato: €${amount}\n` +
+                    `⚡ KWH forniti: ${transaction.declaredKwh || 'N/A'}\n` +
+                    `🔍 ID Transazione: \`${transactionId}\`\n\n` +
+                    `Hai ricevuto il pagamento?`,
+                    {
+                        parse_mode: 'Markdown',
+                        ...Keyboards.getSellerPaymentConfirmKeyboard()
+                    }
+                );
+                
+            } catch (error) {
+                console.error('Error notifying seller:', error);
+            }
+
+            await ctx.editMessageText(
+                '✅ *Dichiarazione di pagamento inviata!*\n\n' +
+                'Il venditore riceverà una notifica e dovrà confermare la ricezione del pagamento.\n\n' +
+                'Riceverai aggiornamenti sullo stato.',
+                { 
+                    parse_mode: 'Markdown',
+                    reply_markup: undefined
+                }
+            );
+        });
+
+        // Handler per problemi pagamento
+        this.bot.action('payment_issues', async (ctx) => {
+            await ctx.answerCbQuery();
+            await ctx.editMessageText(
+                '⚠️ *Problemi con il pagamento?*\n\nScegli un\'opzione:',
+                {
+                    parse_mode: 'Markdown',
+                    ...Keyboards.getPaymentIssuesKeyboard()
+                }
+            );
+        });
+
+        // Seller payment confirmation - FIXED
+        this.bot.action('payment_received', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            // Get transaction ID from message
+            const messageText = ctx.callbackQuery.message.text;
+            const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
+            
+            if (!transactionIdMatch) {
+                await ctx.reply('❌ ID transazione non trovato.');
+                return;
+            }
+            
+            const transactionId = transactionIdMatch[1];
+            const transaction = await this.transactionService.getTransaction(transactionId);
+            
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            await this.transactionService.updateTransactionStatus(
+                transactionId,
+                'completed'
+            );
+
+            // Update user stats
+            await this.userService.updateUserTransactionStats(
+                transaction.sellerId,
+                transaction.actualKwh || transaction.declaredKwh,
+                'sell'
+            );
+            await this.userService.updateUserTransactionStats(
+                transaction.buyerId,
+                transaction.actualKwh || transaction.declaredKwh,
+                'buy'
+            );
+
+            // Notify buyer
+            try {
+                await ctx.telegram.sendMessage(
+                    transaction.buyerId,
+                    Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST,
+                    Keyboards.getFeedbackKeyboard()
+                );
+                
+                // Send transaction ID for feedback
+                await ctx.telegram.sendMessage(
+                    transaction.buyerId,
+                    `🔍 ID Transazione: \`${transactionId}\``,
+                    { parse_mode: 'Markdown' }
+                );
+            } catch (error) {
+                console.error('Error notifying buyer:', error);
+            }
+
+            // Ask seller for feedback too
+            await ctx.editMessageText(
+                Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST,
+                Keyboards.getFeedbackKeyboard()
+            );
+            
+            // Store transaction for feedback
+            ctx.session.completedTransactionId = transactionId;
+        });
+
+        this.bot.action('payment_not_received', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            // Get transaction ID
+            const messageText = ctx.callbackQuery.message.text;
+            const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
+            
+            if (!transactionIdMatch) {
+                await ctx.reply('❌ ID transazione non trovato.');
+                return;
+            }
+            
+            const transactionId = transactionIdMatch[1];
+            const transaction = await this.transactionService.getTransaction(transactionId);
+            
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            // Add issue to transaction
+            await this.transactionService.addTransactionIssue(
+                transactionId,
+                'Pagamento non ricevuto',
+                transaction.sellerId
+            );
+            
+            // Notify buyer about payment issue
+            try {
+                await ctx.telegram.sendMessage(
+                    transaction.buyerId,
+                    '⚠️ *Problema pagamento segnalato*\n\n' +
+                    'Il venditore non conferma la ricezione del pagamento.\n\n' +
+                    'Cosa vuoi fare?',
+                    {
+                        parse_mode: 'Markdown',
+                        ...Keyboards.getPaymentIssuesKeyboard()
+                    }
+                );
+            } catch (error) {
+                console.error('Error notifying buyer:', error);
+            }
+
+            await ctx.editMessageText(
+                '⚠️ Problema pagamento segnalato. L\'acquirente riceverà opzioni per risolvere.',
+                { reply_markup: undefined }
+            );
+        });
+
+        // Payment issue resolution
+        this.bot.action('retry_payment', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            await ctx.editMessageText(
+                '💳 *Riprova il pagamento*\n\n' +
+                'Effettua nuovamente il pagamento secondo gli accordi presi con il venditore.\n\n' +
+                'Una volta completato, usa il pulsante per confermare.',
+                {
+                    parse_mode: 'Markdown',
+                    ...Keyboards.getPaymentConfirmationKeyboard()
+                }
+            );
+        });
+
+        this.bot.action('send_payment_proof', async (ctx) => {
+            await ctx.answerCbQuery();
+            await ctx.editMessageText(
+                '📷 *Invia screenshot del pagamento*\n\n' +
+                'Scatta uno screenshot che mostri chiaramente:\n' +
+                '• Importo inviato\n' +
+                '• Data/ora transazione\n' +
+                '• Destinatario\n\n' +
+                'Invia la foto ora:',
+                { parse_mode: 'Markdown', reply_markup: undefined }
+            );
+            ctx.session.waitingFor = 'payment_proof';
         });
 
         // === CALLBACKS ANNUNCI - FIX BUTTON_DATA_INVALID ===
@@ -1651,6 +2024,66 @@ class KwhBot {
                 parse_mode: 'Markdown',
                 ...Keyboards.getBackToMainMenuKeyboard()
             });
+        });
+
+        // Feedback actions
+        this.bot.action(/^feedback_([1-5])$/, async (ctx) => {
+            const rating = parseInt(ctx.match[1]);
+            await ctx.answerCbQuery();
+            
+            // Get transaction ID
+            let transactionId;
+            const messageText = ctx.callbackQuery.message.text;
+            const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
+            
+            if (transactionIdMatch) {
+                transactionId = transactionIdMatch[1];
+            } else if (ctx.session.completedTransactionId) {
+                transactionId = ctx.session.completedTransactionId;
+            } else {
+                await ctx.reply('❌ ID transazione non trovato.');
+                return;
+            }
+            
+            const transaction = await this.transactionService.getTransaction(transactionId);
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            const isSellerGivingFeedback = ctx.from.id === transaction.sellerId;
+            const targetUserId = isSellerGivingFeedback ? transaction.buyerId : transaction.sellerId;
+
+            if (rating <= 2) {
+                // Ask for reason if negative feedback
+                await ctx.editMessageText(Messages.NEGATIVE_FEEDBACK_REASON, { reply_markup: undefined });
+                ctx.session.waitingFor = 'feedback_reason';
+                ctx.session.feedbackRating = rating;
+                ctx.session.feedbackTargetUserId = targetUserId;
+                ctx.session.transaction = transaction;
+            } else {
+                // Positive feedback, no reason needed
+                await this.transactionService.createFeedback(
+                    transactionId,
+                    ctx.from.id,
+                    targetUserId,
+                    rating,
+                    ''
+                );
+
+                await ctx.editMessageText(
+                    '⭐ Grazie per il feedback!\n\n' +
+                    'La transazione è stata completata con successo.',
+                    { reply_markup: undefined }
+                );
+
+                // Clear session
+                delete ctx.session.completedTransactionId;
+                
+                setTimeout(() => {
+                    ctx.reply('Usa il menu per altre operazioni:', Keyboards.MAIN_MENU);
+                }, 1000);
+            }
         });
     }
 
