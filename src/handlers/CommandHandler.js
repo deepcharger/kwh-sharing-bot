@@ -94,7 +94,7 @@ class CommandHandler {
             await ctx.scene.enter('transactionScene');
         });
 
-        // Quick payments access
+        // FIX: Comando pagamenti migliorato
         this.bot.bot.command('pagamenti', async (ctx) => {
             const userId = ctx.from.id;
             
@@ -122,12 +122,37 @@ class CommandHandler {
                 message += `💳 Metodi: ${announcement?.paymentMethods || 'Come concordato'}\n\n`;
             }
             
-            message += 'Seleziona una transazione per gestire il pagamento:';
-            
-            await ctx.reply(message, {
-                parse_mode: 'Markdown',
-                ...Keyboards.getPaymentTransactionsKeyboard(paymentPending)
-            });
+            // FIX: Se c'è solo un pagamento, vai direttamente alla gestione
+            if (paymentPending.length === 1) {
+                const tx = paymentPending[0];
+                const announcement = await this.bot.announcementService.getAnnouncement(tx.announcementId);
+                const amount = announcement && tx.declaredKwh ? 
+                    (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                
+                message += `\n💳 **PROCEDI CON IL PAGAMENTO:**\n`;
+                message += `Effettua il pagamento di €${amount} secondo i metodi concordati, poi conferma.`;
+                
+                // Salva l'ID nella sessione
+                ctx.session.currentTransactionId = tx.transactionId;
+                
+                await ctx.reply(message, {
+                    parse_mode: 'Markdown',
+                    ...Keyboards.getPaymentConfirmationKeyboard()
+                });
+            } else {
+                // Se ci sono più pagamenti, mostra la lista
+                message += 'Seleziona una transazione per gestire il pagamento:';
+                
+                await ctx.reply(message, {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: paymentPending.map((tx, index) => [{
+                            text: `💳 ${tx.transactionId.slice(-10)} - €${announcement && tx.declaredKwh ? (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A'}`,
+                            callback_data: `select_payment_${tx.transactionId}`
+                        }])
+                    }
+                });
+            }
         });
 
         // Menu button handlers
