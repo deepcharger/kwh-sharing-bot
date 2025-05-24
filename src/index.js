@@ -39,6 +39,100 @@ class KwhBot {
         return text.replace(/_/g, '\\_');
     }
 
+    // Helper method per status emoji
+    getStatusEmoji(status) {
+        const statusEmojis = {
+            'pending_seller_confirmation': '⏳',
+            'confirmed': '✅',
+            'charging_started': '⚡',
+            'charging_in_progress': '🔋',
+            'charging_completed': '🏁',
+            'photo_uploaded': '📷',
+            'kwh_declared': '📊',
+            'payment_requested': '💳',
+            'payment_confirmed': '💰',
+            'completed': '✅',
+            'cancelled': '❌',
+            'disputed': '⚠️'
+        };
+        return statusEmojis[status] || '❓';
+    }
+
+    // Helper method per status text
+    getStatusText(status) {
+        const statusTexts = {
+            'pending_seller_confirmation': 'Attesa conferma',
+            'confirmed': 'Confermata',
+            'charging_started': 'Ricarica avviata',
+            'charging_in_progress': 'In ricarica',
+            'charging_completed': 'Ricarica completata',
+            'photo_uploaded': 'Foto caricata',
+            'kwh_declared': 'KWH dichiarati',
+            'payment_requested': 'Pagamento richiesto',
+            'payment_confirmed': 'Pagamento confermato',
+            'completed': 'Completata',
+            'cancelled': 'Annullata',
+            'disputed': 'In disputa'
+        };
+        return statusTexts[status] || status;
+    }
+
+    // Helper method per formattare dettagli transazione
+    formatTransactionDetails(transaction, announcement, currentUserId) {
+        const isSeller = currentUserId === transaction.sellerId;
+        const role = isSeller ? 'VENDITORE' : 'ACQUIRENTE';
+        
+        const statusText = this.getStatusText(transaction.status);
+        const statusEmoji = this.getStatusEmoji(transaction.status);
+        
+        let details = `💼 **DETTAGLI TRANSAZIONE**\n\n`;
+        details += `🆔 ID: \`${transaction.transactionId}\`\n`;
+        details += `👤 Ruolo: **${role}**\n`;
+        details += `${statusEmoji} Stato: **${statusText}**\n\n`;
+        
+        details += `📅 Data ricarica: ${transaction.scheduledDate}\n`;
+        details += `🏢 Brand: ${transaction.brand}\n`;
+        details += `📍 Posizione: ${transaction.location}\n`;
+        details += `🔌 Connettore: ${transaction.connector}\n\n`;
+        
+        if (announcement) {
+            details += `💰 Prezzo: ${announcement.price}€/KWH\n`;
+        }
+        
+        if (transaction.declaredKwh) {
+            details += `⚡ KWH dichiarati: ${transaction.declaredKwh}\n`;
+            if (announcement) {
+                const amount = (transaction.declaredKwh * announcement.price).toFixed(2);
+                details += `💰 Importo totale: €${amount}\n`;
+            }
+        }
+        
+        if (transaction.issues && transaction.issues.length > 0) {
+            details += `\n⚠️ **Problemi segnalati:** ${transaction.issues.length}\n`;
+        }
+        
+        // Add status-specific instructions
+        switch (transaction.status) {
+            case 'payment_requested':
+                if (!isSeller) {
+                    details += `\n💳 **AZIONE RICHIESTA:** Effettua il pagamento\n`;
+                    details += `Metodi: ${announcement?.paymentMethods || 'Come concordato'}`;
+                } else {
+                    details += `\n⏳ In attesa del pagamento dall'acquirente`;
+                }
+                break;
+            case 'pending_seller_confirmation':
+                if (isSeller) {
+                    details += `\n✅ **AZIONE RICHIESTA:** Conferma o rifiuta la richiesta`;
+                } else {
+                    details += `\n⏳ In attesa della conferma del venditore`;
+                }
+                break;
+        }
+        
+        return details;
+    }
+
     async init() {
         try {
             // Initialize database
@@ -197,6 +291,63 @@ class KwhBot {
             await ctx.reply(statsText, { parse_mode: 'Markdown' });
         });
 
+        // Quick transaction access by ID - NUOVO
+        this.bot.command(/tx (.+)/, async (ctx) => {
+            const transactionId = ctx.match[1].trim();
+            const userId = ctx.from.id;
+            
+            const transaction = await this.transactionService.getTransaction(transactionId);
+            
+            if (!transaction) {
+                await ctx.reply('❌ Transazione non trovata.', Keyboards.MAIN_MENU);
+                return;
+            }
+            
+            // Check if user is involved in this transaction
+            if (transaction.sellerId !== userId && transaction.buyerId !== userId) {
+                await ctx.reply('❌ Non sei autorizzato a visualizzare questa transazione.', Keyboards.MAIN_MENU);
+                return;
+            }
+            
+            // Enter transaction scene with this specific transaction
+            ctx.session.transactionId = transactionId;
+            await ctx.scene.enter('transactionScene');
+        });
+
+        // Quick payments access - NUOVO
+        this.bot.command('pagamenti', async (ctx) => {
+            const userId = ctx.from.id;
+            
+            // Get transactions needing payment
+            const transactions = await this.transactionService.getUserTransactions(userId, 'all');
+            const paymentPending = transactions.filter(t => 
+                t.status === 'payment_requested' && t.buyerId === userId
+            );
+            
+            if (paymentPending.length === 0) {
+                await ctx.reply('✅ Non hai pagamenti in sospeso.', Keyboards.MAIN_MENU);
+                return;
+            }
+            
+            let message = '💳 **PAGAMENTI IN SOSPESO**\n\n';
+            
+            for (const tx of paymentPending) {
+                const announcement = await this.announcementService.getAnnouncement(tx.announcementId);
+                const amount = announcement ? (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                
+                message += `🆔 ${tx.transactionId}\n`;
+                message += `💰 €${amount} (${tx.declaredKwh} KWH × ${announcement?.price || 'N/A'}€)\n`;
+                message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
+            }
+            
+            message += 'Seleziona una transazione per gestire il pagamento:';
+            
+            await ctx.reply(message, {
+                parse_mode: 'Markdown',
+                ...Keyboards.getPaymentTransactionsKeyboard(paymentPending)
+            });
+        });
+
         // Sell KWH command
         this.bot.hears('🔋 Vendi KWH', async (ctx) => {
             await ctx.scene.enter('sellAnnouncementScene');
@@ -222,6 +373,49 @@ class KwhBot {
             await ctx.reply(message, {
                 parse_mode: 'HTML',
                 ...Keyboards.getUserAnnouncementsKeyboard(announcements)
+            });
+        });
+
+        // My transactions command - NUOVO
+        this.bot.hears('💼 Le mie transazioni', async (ctx) => {
+            const userId = ctx.from.id;
+            
+            // Get all user transactions
+            const allTransactions = await this.transactionService.getUserTransactions(userId, 'all');
+            
+            if (allTransactions.length === 0) {
+                await ctx.reply('📭 Non hai ancora transazioni.', Keyboards.MAIN_MENU);
+                return;
+            }
+
+            // Separate by status
+            const pending = allTransactions.filter(t => !['completed', 'cancelled'].includes(t.status));
+            const completed = allTransactions.filter(t => t.status === 'completed');
+            const cancelled = allTransactions.filter(t => t.status === 'cancelled');
+
+            let message = '💼 **LE TUE TRANSAZIONI**\n\n';
+            
+            if (pending.length > 0) {
+                message += `⏳ **IN CORSO (${pending.length}):**\n`;
+                for (const tx of pending.slice(0, 5)) {
+                    const statusEmoji = this.getStatusEmoji(tx.status);
+                    const statusText = this.getStatusText(tx.status);
+                    message += `${statusEmoji} ${tx.transactionId}\n`;
+                    message += `📊 ${statusText}\n`;
+                    message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
+                }
+                if (pending.length > 5) {
+                    message += `... e altre ${pending.length - 5} transazioni\n\n`;
+                }
+            }
+            
+            message += `✅ **Completate:** ${completed.length}\n`;
+            message += `❌ **Annullate:** ${cancelled.length}\n\n`;
+            message += `Seleziona una transazione per gestirla:`;
+            
+            await ctx.reply(message, {
+                parse_mode: 'Markdown',
+                ...Keyboards.getTransactionsKeyboard(pending, completed)
             });
         });
 
@@ -325,6 +519,27 @@ class KwhBot {
                 parse_mode: 'Markdown',
                 ...Keyboards.getHelpKeyboard()
             });
+        });
+
+        // Quick access to transaction from message - NUOVO
+        this.bot.hears(/T[_A]\d+-\d+/, async (ctx) => {
+            const transactionId = ctx.message.text.match(/(T[_A]\d+-\d+)/)[1];
+            const userId = ctx.from.id;
+            
+            const transaction = await this.transactionService.getTransaction(transactionId);
+            
+            if (!transaction) {
+                await ctx.reply('❌ Transazione non trovata.');
+                return;
+            }
+            
+            if (transaction.sellerId !== userId && transaction.buyerId !== userId) {
+                await ctx.reply('❌ Non autorizzato.');
+                return;
+            }
+            
+            ctx.session.transactionId = transactionId;
+            await ctx.scene.enter('transactionScene');
         });
 
         // Handler per gestire il testo dopo richiesta di motivo rifiuto
@@ -437,6 +652,105 @@ class KwhBot {
             await ctx.editMessageText(message, {
                 parse_mode: 'Markdown',
                 ...Keyboards.getBackToMainMenuKeyboard()
+            });
+        });
+
+        // Transaction management callbacks - NUOVO
+        this.bot.action(/^view_transaction_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const transactionId = ctx.match[1];
+            
+            const transaction = await this.transactionService.getTransaction(transactionId);
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            // Check authorization
+            const userId = ctx.from.id;
+            if (transaction.sellerId !== userId && transaction.buyerId !== userId) {
+                await ctx.editMessageText('❌ Non autorizzato.');
+                return;
+            }
+            
+            // Show transaction details
+            const announcement = await this.announcementService.getAnnouncement(transaction.announcementId);
+            const detailText = this.formatTransactionDetails(transaction, announcement, userId);
+            
+            await ctx.editMessageText(detailText, {
+                parse_mode: 'Markdown',
+                ...Keyboards.getTransactionActionsKeyboard(transactionId, transaction.status, userId === transaction.sellerId)
+            });
+        });
+
+        this.bot.action(/^manage_transaction_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const transactionId = ctx.match[1];
+            
+            ctx.session.transactionId = transactionId;
+            await ctx.scene.enter('transactionScene');
+        });
+
+        this.bot.action('transaction_history', async (ctx) => {
+            await ctx.answerCbQuery();
+            const userId = ctx.from.id;
+            
+            const transactions = await this.transactionService.getUserTransactions(userId, 'all');
+            const completed = transactions.filter(t => t.status === 'completed');
+            const cancelled = transactions.filter(t => t.status === 'cancelled');
+            
+            let message = '📜 **CRONOLOGIA TRANSAZIONI**\n\n';
+            
+            if (completed.length > 0) {
+                message += `✅ **COMPLETATE (${completed.length}):**\n`;
+                completed.slice(-10).reverse().forEach(tx => {
+                    message += `• ${tx.transactionId}\n`;
+                    message += `  📅 ${tx.completedAt ? tx.completedAt.toLocaleDateString('it-IT') : tx.createdAt.toLocaleDateString('it-IT')}\n`;
+                });
+                message += '\n';
+            }
+            
+            if (cancelled.length > 0) {
+                message += `❌ **ANNULLATE (${cancelled.length}):**\n`;
+                cancelled.slice(-5).reverse().forEach(tx => {
+                    message += `• ${tx.transactionId}\n`;
+                    message += `  📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n`;
+                });
+            }
+            
+            await ctx.editMessageText(message, {
+                parse_mode: 'Markdown',
+                ...Keyboards.getBackToMainMenuKeyboard()
+            });
+        });
+
+        this.bot.action('back_to_transactions', async (ctx) => {
+            await ctx.answerCbQuery();
+            // Simulate the "Le mie transazioni" command
+            const userId = ctx.from.id;
+            
+            const allTransactions = await this.transactionService.getUserTransactions(userId, 'all');
+            const pending = allTransactions.filter(t => !['completed', 'cancelled'].includes(t.status));
+            const completed = allTransactions.filter(t => t.status === 'completed');
+
+            let message = '💼 **LE TUE TRANSAZIONI**\n\n';
+            
+            if (pending.length > 0) {
+                message += `⏳ **IN CORSO (${pending.length}):**\n`;
+                for (const tx of pending.slice(0, 5)) {
+                    const statusEmoji = this.getStatusEmoji(tx.status);
+                    const statusText = this.getStatusText(tx.status);
+                    message += `${statusEmoji} ${tx.transactionId}\n`;
+                    message += `📊 ${statusText}\n`;
+                    message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
+                }
+            }
+            
+            message += `✅ **Completate:** ${completed.length}`;
+            
+            await ctx.editMessageText(message, {
+                parse_mode: 'Markdown',
+                ...Keyboards.getTransactionsKeyboard(pending, completed)
             });
         });
 
@@ -1327,6 +1641,8 @@ class KwhBot {
             const commands = [
                 { command: 'start', description: 'Avvia il bot e mostra il menu principale' },
                 { command: 'help', description: 'Mostra la guida completa del bot' },
+                { command: 'tx', description: 'Accedi a una transazione specifica (es: /tx ID)' },
+                { command: 'pagamenti', description: 'Visualizza pagamenti in sospeso' },
                 { command: 'admin', description: 'Dashboard amministratore (solo admin)' },
                 { command: 'stats', description: 'Mostra statistiche generali (solo admin)' }
             ];
