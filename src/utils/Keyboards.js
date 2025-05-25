@@ -1,12 +1,15 @@
 const { Markup } = require('telegraf');
 
 class Keyboards {
+    // 🚨 FIX PRINCIPALE: Aggiunto .reply_markup alla proprietà MAIN_MENU
     static get MAIN_MENU() {
-        return Markup.keyboard([
-            ['🔋 Vendi KWH', '📥 Richieste pendenti'],
-            ['📊 I miei annunci', '💼 Le mie transazioni'],
-            ['⭐ I miei feedback', '❓ Aiuto']
-        ]).resize().persistent();
+        return {
+            reply_markup: Markup.keyboard([
+                ['🔋 Vendi KWH', '📥 Richieste pendenti'],
+                ['📊 I miei annunci', '💼 Le mie transazioni'],
+                ['⭐ I miei feedback', '❓ Aiuto']
+            ]).resize().persistent().reply_markup
+        };
     }
 
     static get CANCEL_ONLY() {
@@ -258,9 +261,6 @@ class Keyboards {
         
         return Markup.inlineKeyboard(buttons);
     }
-
-    // FIX: Rimuovo metodo getPaymentTransactionsKeyboard perché non più necessario
-    // Il nuovo sistema identifica automaticamente la transazione
 
     // Metodo helper per creare ID corti (max 10 caratteri)
     static createShortId(fullId) {
