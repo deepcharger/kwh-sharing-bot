@@ -98,7 +98,7 @@ class CommandHandler {
             await this.bot.chatCleaner.enterScene(ctx, 'transactionScene');
         });
 
-        // FIX: Comando pagamenti migliorato con pulizia
+        // FIX: Comando pagamenti corretto - risolve l'errore await in map()
         this.bot.bot.command('pagamenti', async (ctx) => {
             const userId = ctx.from.id;
             
@@ -122,10 +122,18 @@ class CommandHandler {
                 return;
             }
             
+            // FIX: Usa Promise.all per ottenere tutti gli annunci in parallelo
+            const announcements = await Promise.all(
+                paymentPending.map(tx => 
+                    this.bot.announcementService.getAnnouncement(tx.announcementId)
+                )
+            );
+            
             let message = '💳 **PAGAMENTI IN SOSPESO**\n\n';
             
-            for (const [index, tx] of paymentPending.entries()) {
-                const announcement = await this.bot.announcementService.getAnnouncement(tx.announcementId);
+            // Ora possiamo usare forEach normalmente perché abbiamo già tutti i dati
+            paymentPending.forEach((tx, index) => {
+                const announcement = announcements[index];
                 const amount = announcement && tx.declaredKwh ? 
                     (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
                 
@@ -133,12 +141,12 @@ class CommandHandler {
                 message += `🆔 \`${tx.transactionId}\`\n`;
                 message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n`;
                 message += `💳 Metodi: ${announcement?.paymentMethods || 'Come concordato'}\n\n`;
-            }
+            });
             
             // FIX: Se c'è solo un pagamento, vai direttamente alla gestione
             if (paymentPending.length === 1) {
                 const tx = paymentPending[0];
-                const announcement = await this.bot.announcementService.getAnnouncement(tx.announcementId);
+                const announcement = announcements[0];
                 const amount = announcement && tx.declaredKwh ? 
                     (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
                 
@@ -154,21 +162,24 @@ class CommandHandler {
                     messageType: 'payment'
                 });
             } else {
-                // Se ci sono più pagamenti, mostra la lista
+                // FIX: Costruisci la keyboard senza await in map()
+                const keyboardButtons = paymentPending.map((tx, index) => {
+                    const announcement = announcements[index];
+                    const amount = announcement && tx.declaredKwh ? 
+                        (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                    
+                    return [{
+                        text: `💳 ${tx.transactionId.slice(-10)} - €${amount}`,
+                        callback_data: `select_payment_${tx.transactionId}`
+                    }];
+                });
+                
                 message += 'Seleziona una transazione per gestire il pagamento:';
                 
                 await this.bot.chatCleaner.replaceMessage(ctx, message, {
                     parse_mode: 'Markdown',
                     reply_markup: {
-                        inline_keyboard: paymentPending.map((tx, index) => {
-                            const announcement = await this.bot.announcementService.getAnnouncement(tx.announcementId);
-                            const amount = announcement && tx.declaredKwh ? 
-                                (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
-                            return [{
-                                text: `💳 ${tx.transactionId.slice(-10)} - €${amount}`,
-                                callback_data: `select_payment_${tx.transactionId}`
-                            }];
-                        })
+                        inline_keyboard: keyboardButtons
                     },
                     messageType: 'payment'
                 });
