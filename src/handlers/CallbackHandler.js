@@ -7,11 +7,11 @@ class CallbackHandler {
     }
 
     setupCallbacks() {
+        // Navigation callbacks con pulizia
+        this.setupNavigationCallbacks();
+        
         // Admin callbacks
         this.setupAdminCallbacks();
-        
-        // Navigation callbacks
-        this.setupNavigationCallbacks();
         
         // Transaction management callbacks
         this.setupTransactionCallbacks();
@@ -32,166 +32,18 @@ class CallbackHandler {
         this.setupHelpCallbacks();
     }
 
-    setupAdminCallbacks() {
-        this.bot.bot.action('admin_general_stats', async (ctx) => {
-            await ctx.answerCbQuery();
-            
-            const transactionStats = await this.bot.transactionService.getTransactionStats();
-            const announcementStats = await this.bot.announcementService.getAnnouncementStats();
-            
-            let statsText = '📊 **STATISTICHE DETTAGLIATE**\n\n';
-            
-            if (transactionStats && transactionStats.overall) {
-                statsText += `🔄 **Transazioni:**\n`;
-                statsText += `• Totali: ${transactionStats.overall.totalTransactions || 0}\n`;
-                statsText += `• Completate: ${transactionStats.overall.completedTransactions || 0}\n`;
-                statsText += `• Tasso successo: ${transactionStats.overall.totalTransactions > 0 ? 
-                    ((transactionStats.overall.completedTransactions / transactionStats.overall.totalTransactions) * 100).toFixed(1) : 0}%\n`;
-                statsText += `• KWH totali: ${(transactionStats.overall.totalKwh || 0).toFixed(1)}\n\n`;
-            }
-            
-            if (announcementStats) {
-                statsText += `📋 **Annunci:**\n`;
-                statsText += `• Attivi: ${announcementStats.totalActive || 0}\n`;
-                statsText += `• Prezzo medio: €${(announcementStats.avgPrice || 0).toFixed(3)}/KWH\n`;
-                statsText += `• Range prezzi: €${(announcementStats.minPrice || 0).toFixed(2)} - €${(announcementStats.maxPrice || 0).toFixed(2)}\n`;
-            }
-            
-            await ctx.editMessageText(statsText, {
-                parse_mode: 'Markdown',
-                ...Keyboards.getBackToMainMenuKeyboard()
-            });
-        });
-
-        this.bot.bot.action('admin_pending_transactions', async (ctx) => {
-            await ctx.answerCbQuery();
-            const pendingTransactions = await this.bot.transactionService.getPendingTransactions();
-            
-            if (pendingTransactions.length === 0) {
-                await ctx.editMessageText(
-                    '✅ **Nessuna transazione in sospeso**\n\nTutte le transazioni sono aggiornate!',
-                    { parse_mode: 'Markdown' }
-                );
-                return;
-            }
-            
-            let message = '⏳ **TRANSAZIONI IN SOSPESO:**\n\n';
-            for (const tx of pendingTransactions.slice(0, 10)) {
-                message += `🆔 ${tx.transactionId}\n`;
-                message += `📊 Status: ${tx.status}\n`;
-                message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
-            }
-            
-            if (pendingTransactions.length > 10) {
-                message += `\n... e altre ${pendingTransactions.length - 10} transazioni`;
-            }
-            
-            await ctx.editMessageText(message, {
-                parse_mode: 'Markdown',
-                ...Keyboards.getBackToMainMenuKeyboard()
-            });
-        });
-
-        this.bot.bot.action('admin_open_disputes', async (ctx) => {
-            await ctx.answerCbQuery();
-            const disputedTransactions = await this.bot.transactionService.getUserTransactions(null, 'all');
-            const disputes = disputedTransactions.filter(tx => tx.status === 'disputed' || tx.issues?.length > 0);
-            
-            if (disputes.length === 0) {
-                await ctx.editMessageText(
-                    '✅ **Nessuna disputa aperta**\n\nTutte le transazioni procedono regolarmente!',
-                    { parse_mode: 'Markdown' }
-                );
-                return;
-            }
-            
-            let message = '⚠️ **DISPUTE APERTE:**\n\n';
-            for (const dispute of disputes.slice(0, 5)) {
-                message += `🆔 ${dispute.transactionId}\n`;
-                message += `⚠️ Issues: ${dispute.issues?.length || 0}\n`;
-                message += `📅 ${dispute.createdAt.toLocaleDateString('it-IT')}\n\n`;
-            }
-            
-            await ctx.editMessageText(message, {
-                parse_mode: 'Markdown',
-                ...Keyboards.getBackToMainMenuKeyboard()
-            });
-        });
-
-        this.bot.bot.action('admin_manage_users', async (ctx) => {
-            await ctx.answerCbQuery();
-            const allUsers = await this.bot.userService.getAllUsersWithStats();
-            
-            let message = '👥 **GESTIONE UTENTI**\n\n';
-            message += `📊 **Statistiche generali:**\n`;
-            message += `• Utenti totali: ${allUsers.length}\n`;
-            message += `• Venditori TOP: ${allUsers.filter(u => u.sellerBadge === 'TOP').length}\n`;
-            message += `• Venditori AFFIDABILI: ${allUsers.filter(u => u.sellerBadge === 'AFFIDABILE').length}\n\n`;
-            
-            const topUsers = allUsers
-                .filter(u => u.totalFeedback > 0)
-                .sort((a, b) => b.positivePercentage - a.positivePercentage)
-                .slice(0, 5);
-                
-            if (topUsers.length > 0) {
-                message += `🏆 **Top 5 venditori:**\n`;
-                topUsers.forEach((user, index) => {
-                    message += `${index + 1}. @${user.username || 'utente'} (${user.positivePercentage}%)\n`;
-                });
-            }
-            
-            await ctx.editMessageText(message, {
-                parse_mode: 'Markdown',
-                ...Keyboards.getBackToMainMenuKeyboard()
-            });
-        });
-
-        this.bot.bot.action('admin_active_announcements', async (ctx) => {
-            await ctx.answerCbQuery();
-            const activeAnnouncements = await this.bot.announcementService.getActiveAnnouncements(20);
-            
-            if (activeAnnouncements.length === 0) {
-                await ctx.editMessageText(
-                    '📭 **Nessun annuncio attivo**\n\nIl marketplace è vuoto al momento.',
-                    { parse_mode: 'Markdown' }
-                );
-                return;
-            }
-            
-            let message = '📋 **ANNUNCI ATTIVI:**\n\n';
-            for (const ann of activeAnnouncements.slice(0, 10)) {
-                message += `💰 ${ann.price}€/KWH - ${ann.zones}\n`;
-                message += `📅 ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
-            }
-            
-            if (activeAnnouncements.length > 10) {
-                message += `\n... e altri ${activeAnnouncements.length - 10} annunci`;
-            }
-            
-            await ctx.editMessageText(message, {
-                parse_mode: 'Markdown',
-                ...Keyboards.getBackToMainMenuKeyboard()
-            });
-        });
-    }
-
     setupNavigationCallbacks() {
+        // FIX: Menu principale con pulizia completa
         this.bot.bot.action('back_to_main', async (ctx) => {
             await ctx.answerCbQuery();
+            
             if (ctx.scene) {
                 await ctx.scene.leave();
             }
-            await ctx.deleteMessage();
-            await ctx.reply(
-                '🏠 **Menu Principale**\n\nSeleziona un\'opzione:',
-                {
-                    parse_mode: 'Markdown',
-                    ...Keyboards.MAIN_MENU
-                }
-            );
+            
+            // Pulisci completamente la chat e torna al menu
+            await this.bot.chatCleaner.resetUserChat(ctx);
         });
-
-        // FIX: Rimosso callback back_to_payments ridondante
 
         this.bot.bot.action('back_to_txs', async (ctx) => {
             await ctx.answerCbQuery();
@@ -219,9 +71,11 @@ class CallbackHandler {
             
             message += `✅ **Completate:** ${completed.length}`;
             
-            await ctx.editMessageText(message, {
+            // FIX: Usa editOrReplace per mantenere pulita la chat
+            await this.bot.chatCleaner.editOrReplace(ctx, message, {
                 parse_mode: 'Markdown',
-                ...Keyboards.getTransactionsKeyboard(pending, completed)
+                reply_markup: Keyboards.getTransactionsKeyboard(pending, completed).reply_markup,
+                messageType: 'navigation'
             });
         });
 
@@ -231,24 +85,32 @@ class CallbackHandler {
             const announcements = await this.bot.announcementService.getUserAnnouncements(userId);
             
             if (announcements.length === 0) {
-                await ctx.editMessageText('📭 Non hai ancora pubblicato annunci.');
-                setTimeout(() => {
-                    ctx.deleteMessage().catch(() => {});
-                    ctx.reply('Usa il menu per pubblicare un annuncio:', Keyboards.MAIN_MENU);
-                }, 2000);
+                // Messaggio temporaneo che si auto-elimina
+                await this.bot.chatCleaner.sendTemporaryMessage(
+                    ctx, 
+                    '📭 Non hai ancora pubblicato annunci.',
+                    {},
+                    3000
+                );
+                
+                // Torna al menu dopo 3 secondi
+                setTimeout(async () => {
+                    await this.bot.chatCleaner.resetUserChat(ctx);
+                }, 3000);
                 return;
             }
 
-            let message = '📊 <b>I TUOI ANNUNCI ATTIVI:</b>\n\n';
+            let message = '📊 **I TUOI ANNUNCI ATTIVI:**\n\n';
             for (const ann of announcements) {
                 message += `🆔 ${ann.announcementId}\n`;
                 message += `💰 ${ann.price}€/KWH\n`;
                 message += `📅 Pubblicato: ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
             }
             
-            await ctx.editMessageText(message, {
-                parse_mode: 'HTML',
-                ...Keyboards.getUserAnnouncementsKeyboard(announcements)
+            await this.bot.chatCleaner.editOrReplace(ctx, message, {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.getUserAnnouncementsKeyboard(announcements).reply_markup,
+                messageType: 'navigation'
             });
         });
 
@@ -285,9 +147,162 @@ class CallbackHandler {
                 });
             }
             
+            await this.bot.chatCleaner.editOrReplace(ctx, message, {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup,
+                messageType: 'navigation'
+            });
+        });
+    }
+
+    setupAdminCallbacks() {
+        this.bot.bot.action('admin_general_stats', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const transactionStats = await this.bot.transactionService.getTransactionStats();
+            const announcementStats = await this.bot.announcementService.getAnnouncementStats();
+            
+            let statsText = '📊 **STATISTICHE DETTAGLIATE**\n\n';
+            
+            if (transactionStats && transactionStats.overall) {
+                statsText += `🔄 **Transazioni:**\n`;
+                statsText += `• Totali: ${transactionStats.overall.totalTransactions || 0}\n`;
+                statsText += `• Completate: ${transactionStats.overall.completedTransactions || 0}\n`;
+                statsText += `• Tasso successo: ${transactionStats.overall.totalTransactions > 0 ? 
+                    ((transactionStats.overall.completedTransactions / transactionStats.overall.totalTransactions) * 100).toFixed(1) : 0}%\n`;
+                statsText += `• KWH totali: ${(transactionStats.overall.totalKwh || 0).toFixed(1)}\n\n`;
+            }
+            
+            if (announcementStats) {
+                statsText += `📋 **Annunci:**\n`;
+                statsText += `• Attivi: ${announcementStats.totalActive || 0}\n`;
+                statsText += `• Prezzo medio: €${(announcementStats.avgPrice || 0).toFixed(3)}/KWH\n`;
+                statsText += `• Range prezzi: €${(announcementStats.minPrice || 0).toFixed(2)} - €${(announcementStats.maxPrice || 0).toFixed(2)}\n`;
+            }
+            
+            await ctx.editMessageText(statsText, {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
+            });
+        });
+
+        this.bot.bot.action('admin_pending_transactions', async (ctx) => {
+            await ctx.answerCbQuery();
+            const pendingTransactions = await this.bot.transactionService.getPendingTransactions();
+            
+            if (pendingTransactions.length === 0) {
+                await ctx.editMessageText(
+                    '✅ **Nessuna transazione in sospeso**\n\nTutte le transazioni sono aggiornate!',
+                    { 
+                        parse_mode: 'Markdown',
+                        reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
+                    }
+                );
+                return;
+            }
+            
+            let message = '⏳ **TRANSAZIONI IN SOSPESO:**\n\n';
+            for (const tx of pendingTransactions.slice(0, 10)) {
+                message += `🆔 ${tx.transactionId}\n`;
+                message += `📊 Status: ${tx.status}\n`;
+                message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
+            }
+            
+            if (pendingTransactions.length > 10) {
+                message += `\n... e altre ${pendingTransactions.length - 10} transazioni`;
+            }
+            
             await ctx.editMessageText(message, {
                 parse_mode: 'Markdown',
-                ...Keyboards.getBackToMainMenuKeyboard()
+                reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
+            });
+        });
+
+        this.bot.bot.action('admin_open_disputes', async (ctx) => {
+            await ctx.answerCbQuery();
+            const disputedTransactions = await this.bot.transactionService.getUserTransactions(null, 'all');
+            const disputes = disputedTransactions.filter(tx => tx.status === 'disputed' || tx.issues?.length > 0);
+            
+            if (disputes.length === 0) {
+                await ctx.editMessageText(
+                    '✅ **Nessuna disputa aperta**\n\nTutte le transazioni procedono regolarmente!',
+                    { 
+                        parse_mode: 'Markdown',
+                        reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
+                    }
+                );
+                return;
+            }
+            
+            let message = '⚠️ **DISPUTE APERTE:**\n\n';
+            for (const dispute of disputes.slice(0, 5)) {
+                message += `🆔 ${dispute.transactionId}\n`;
+                message += `⚠️ Issues: ${dispute.issues?.length || 0}\n`;
+                message += `📅 ${dispute.createdAt.toLocaleDateString('it-IT')}\n\n`;
+            }
+            
+            await ctx.editMessageText(message, {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
+            });
+        });
+
+        this.bot.bot.action('admin_manage_users', async (ctx) => {
+            await ctx.answerCbQuery();
+            const allUsers = await this.bot.userService.getAllUsersWithStats();
+            
+            let message = '👥 **GESTIONE UTENTI**\n\n';
+            message += `📊 **Statistiche generali:**\n`;
+            message += `• Utenti totali: ${allUsers.length}\n`;
+            message += `• Venditori TOP: ${allUsers.filter(u => u.sellerBadge === 'TOP').length}\n`;
+            message += `• Venditori AFFIDABILI: ${allUsers.filter(u => u.sellerBadge === 'AFFIDABILE').length}\n\n`;
+            
+            const topUsers = allUsers
+                .filter(u => u.totalFeedback > 0)
+                .sort((a, b) => b.positivePercentage - a.positivePercentage)
+                .slice(0, 5);
+                
+            if (topUsers.length > 0) {
+                message += `🏆 **Top 5 venditori:**\n`;
+                topUsers.forEach((user, index) => {
+                    message += `${index + 1}. @${user.username || 'utente'} (${user.positivePercentage}%)\n`;
+                });
+            }
+            
+            await ctx.editMessageText(message, {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
+            });
+        });
+
+        this.bot.bot.action('admin_active_announcements', async (ctx) => {
+            await ctx.answerCbQuery();
+            const activeAnnouncements = await this.bot.announcementService.getActiveAnnouncements(20);
+            
+            if (activeAnnouncements.length === 0) {
+                await ctx.editMessageText(
+                    '📭 **Nessun annuncio attivo**\n\nIl marketplace è vuoto al momento.',
+                    { 
+                        parse_mode: 'Markdown',
+                        reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
+                    }
+                );
+                return;
+            }
+            
+            let message = '📋 **ANNUNCI ATTIVI:**\n\n';
+            for (const ann of activeAnnouncements.slice(0, 10)) {
+                message += `💰 ${ann.price}€/KWH - ${ann.zones}\n`;
+                message += `📅 ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
+            }
+            
+            if (activeAnnouncements.length > 10) {
+                message += `\n... e altri ${activeAnnouncements.length - 10} annunci`;
+            }
+            
+            await ctx.editMessageText(message, {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
             });
         });
     }
@@ -311,28 +326,30 @@ class CallbackHandler {
             );
 
             try {
-                await ctx.telegram.sendMessage(
-                    transaction.buyerId,
+                // Messaggio importante per il buyer - mantieni persistente
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                     `✅ *Richiesta accettata!*\n\n` +
                     `Il venditore ha confermato la tua richiesta per ${transaction.scheduledDate}.\n` +
-                    `Ti avviseremo quando sarà il momento della ricarica.`,
+                    `Ti avviseremo quando sarà il momento della ricarica.\n\n` +
+                    `🔍 ID Transazione: \`${transactionId}\``,
                     { parse_mode: 'Markdown' }
                 );
             } catch (error) {
                 console.error('Error notifying buyer:', error);
             }
 
-            await ctx.editMessageText(
+            // Messaggio di conferma temporaneo per il seller
+            await this.bot.chatCleaner.sendConfirmationMessage(ctx,
                 '✅ Richiesta accettata! L\'acquirente è stato notificato.\n\n' +
-                'Riceverai una notifica quando sarà il momento di attivare la ricarica.',
-                { parse_mode: 'Markdown' }
+                'Riceverai una notifica quando sarà il momento di attivare la ricarica.'
             );
             
             // Schedule reminder for charging time
             setTimeout(async () => {
                 try {
-                    await ctx.telegram.sendMessage(
-                        transaction.sellerId,
+                    await this.bot.chatCleaner.sendPersistentMessage(
+                        { telegram: ctx.telegram, from: { id: transaction.sellerId } },
                         `⏰ È il momento di attivare la ricarica!\n\n` +
                         `ID Transazione: \`${transactionId}\`\n` +
                         `Data/ora: ${transaction.scheduledDate}\n` +
@@ -340,13 +357,13 @@ class CallbackHandler {
                         `Posizione: ${transaction.location}`,
                         {
                             parse_mode: 'Markdown',
-                            ...Keyboards.getActivateChargingKeyboard()
+                            reply_markup: Keyboards.getActivateChargingKeyboard().reply_markup
                         }
                     );
                 } catch (error) {
                     console.error('Error sending charging reminder:', error);
                 }
-            }, 30000); // 30 seconds for testing
+            }, 30000);
         });
 
         this.bot.bot.action(/^reject_request_(.+)$/, async (ctx) => {
@@ -377,7 +394,7 @@ class CallbackHandler {
             const message = `💬 **Contatta l'acquirente**\n\n`;
             
             if (buyerUsername !== 'user') {
-                await ctx.reply(
+                await this.bot.chatCleaner.sendTemporaryMessage(ctx,
                     message +
                     `Puoi contattare direttamente @${buyerUsername} cliccando qui:\n` +
                     `${telegramLink}\n\n` +
@@ -390,10 +407,11 @@ class CallbackHandler {
                     { 
                         parse_mode: 'Markdown',
                         disable_web_page_preview: true 
-                    }
+                    },
+                    10000 // Auto-elimina dopo 10 secondi
                 );
             } else {
-                await ctx.reply(
+                await this.bot.chatCleaner.sendTemporaryMessage(ctx,
                     message +
                     `L'utente non ha un username pubblico.\n` +
                     `ID Utente: \`${buyerId}\`\n\n` +
@@ -402,7 +420,8 @@ class CallbackHandler {
                     { 
                         parse_mode: 'Markdown',
                         disable_web_page_preview: true 
-                    }
+                    },
+                    10000
                 );
             }
         });
@@ -417,7 +436,7 @@ class CallbackHandler {
             const pending = allTransactions.filter(t => !['completed', 'cancelled'].includes(t.status));
             
             if (index >= pending.length) {
-                await ctx.editMessageText('❌ Transazione non trovata.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Transazione non trovata.');
                 return;
             }
             
@@ -428,9 +447,10 @@ class CallbackHandler {
             const shortId = transaction.transactionId.slice(-10);
             this.bot.cacheTransactionId(shortId, transaction.transactionId);
             
-            await ctx.editMessageText(detailText, {
+            await this.bot.chatCleaner.editOrReplace(ctx, detailText, {
                 parse_mode: 'Markdown',
-                ...Keyboards.getTransactionActionsKeyboard(transaction.transactionId, transaction.status, userId === transaction.sellerId)
+                reply_markup: Keyboards.getTransactionActionsKeyboard(transaction.transactionId, transaction.status, userId === transaction.sellerId).reply_markup,
+                messageType: 'transaction_details'
             });
         });
 
@@ -441,17 +461,17 @@ class CallbackHandler {
             const transaction = await this.bot.findTransactionByShortId(shortId, ctx.from.id);
             
             if (!transaction) {
-                await ctx.editMessageText('❌ Transazione non trovata.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Transazione non trovata.');
                 return;
             }
             
             ctx.session.transactionId = transaction.transactionId;
-            await ctx.scene.enter('transactionScene');
+            await this.bot.chatCleaner.enterScene(ctx, 'transactionScene');
         });
     }
 
     setupPaymentCallbacks() {
-        // FIX PRINCIPALE: Nuovo sistema di pagamento senza inserimento manuale ID
+        // FIX PRINCIPALE: Payment confirmation con pulizia migliorata
         this.bot.bot.action('payment_completed', async (ctx) => {
             await ctx.answerCbQuery();
             
@@ -472,7 +492,6 @@ class CallbackHandler {
             
             // Se ancora non trovato, cerca nei messaggi precedenti della conversazione
             if (!transactionId) {
-                // Cerca nelle transazioni dell'utente in stato payment_requested
                 const userId = ctx.from.id;
                 const transactions = await this.bot.transactionService.getUserTransactions(userId, 'all');
                 const paymentPending = transactions.filter(t => 
@@ -480,10 +499,9 @@ class CallbackHandler {
                 );
                 
                 if (paymentPending.length === 1) {
-                    // Se c'è solo una transazione in attesa di pagamento, usa quella
                     transactionId = paymentPending[0].transactionId;
                 } else if (paymentPending.length > 1) {
-                    // Se ci sono più transazioni, mostra una lista per scegliere
+                    // Mostra lista pulita per scegliere
                     await ctx.editMessageText(
                         '💳 **HAI PIÙ PAGAMENTI IN SOSPESO**\n\n' +
                         'Seleziona la transazione per cui hai effettuato il pagamento:',
@@ -502,17 +520,18 @@ class CallbackHandler {
             }
             
             if (!transactionId) {
-                await ctx.editMessageText(
+                await this.bot.chatCleaner.editOrReplace(ctx,
                     '❌ **Errore: transazione non identificata**\n\n' +
                     'Non riesco a trovare la transazione per cui confermare il pagamento.\n' +
-                    'Contatta il venditore direttamente per risolvere.',
+                    'Usa il comando /pagamenti per riprovare.',
                     {
                         parse_mode: 'Markdown',
                         reply_markup: {
                             inline_keyboard: [[
                                 { text: '🏠 Menu principale', callback_data: 'back_to_main' }
                             ]]
-                        }
+                        },
+                        messageType: 'error'
                     }
                 );
                 return;
@@ -521,7 +540,6 @@ class CallbackHandler {
             await this.processPaymentConfirmation(ctx, transactionId);
         });
 
-        // FIX: Nuovo callback per conferma pagamento specifico
         this.bot.bot.action(/^confirm_payment_(.+)$/, async (ctx) => {
             await ctx.answerCbQuery();
             const transactionId = ctx.match[1];
@@ -534,7 +552,27 @@ class CallbackHandler {
                 '⚠️ *Problemi con il pagamento?*\n\nScegli un\'opzione:',
                 {
                     parse_mode: 'Markdown',
-                    ...Keyboards.getPaymentIssuesKeyboard()
+                    reply_markup: Keyboards.getPaymentIssuesKeyboard().reply_markup
+                }
+            );
+        });
+
+        this.bot.bot.action('payment_in_progress', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            await ctx.editMessageText(
+                '⏰ **PAGAMENTO IN CORSO**\n\n' +
+                'Hai indicato che stai ancora effettuando il pagamento.\n\n' +
+                'Una volta completato, torna qui e premi "Ho effettuato il pagamento".',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '✅ Ora ho completato il pagamento', callback_data: 'payment_completed' }],
+                            [{ text: '❌ Ho ancora problemi', callback_data: 'payment_issues' }],
+                            [{ text: '🏠 Torna al menu', callback_data: 'back_to_main' }]
+                        ]
+                    }
                 }
             );
         });
@@ -546,7 +584,7 @@ class CallbackHandler {
             const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
             
             if (!transactionIdMatch) {
-                await ctx.reply('❌ ID transazione non trovato.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ ID transazione non trovato.');
                 return;
             }
             
@@ -575,16 +613,15 @@ class CallbackHandler {
             );
 
             try {
-                await ctx.telegram.sendMessage(
-                    transaction.buyerId,
-                    Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST,
-                    Keyboards.getFeedbackKeyboard()
-                );
-                
-                await ctx.telegram.sendMessage(
-                    transaction.buyerId,
-                    `🔍 ID Transazione: \`${transactionId}\``,
-                    { parse_mode: 'Markdown' }
+                // Messaggi importanti - mantieni persistenti
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.buyerId } },
+                    Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST + 
+                    `\n\n🔍 ID Transazione: \`${transactionId}\``,
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
+                    }
                 );
             } catch (error) {
                 console.error('Error notifying buyer:', error);
@@ -592,7 +629,10 @@ class CallbackHandler {
 
             await ctx.editMessageText(
                 Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST,
-                Keyboards.getFeedbackKeyboard()
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
+                }
             );
             
             ctx.session.completedTransactionId = transactionId;
@@ -605,7 +645,7 @@ class CallbackHandler {
             const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
             
             if (!transactionIdMatch) {
-                await ctx.reply('❌ ID transazione non trovato.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ ID transazione non trovato.');
                 return;
             }
             
@@ -624,14 +664,14 @@ class CallbackHandler {
             );
             
             try {
-                await ctx.telegram.sendMessage(
-                    transaction.buyerId,
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                     '⚠️ *Problema pagamento segnalato*\n\n' +
                     'Il venditore non conferma la ricezione del pagamento.\n\n' +
                     'Cosa vuoi fare?',
                     {
                         parse_mode: 'Markdown',
-                        ...Keyboards.getPaymentIssuesKeyboard()
+                        reply_markup: Keyboards.getPaymentIssuesKeyboard().reply_markup
                     }
                 );
             } catch (error) {
@@ -653,7 +693,7 @@ class CallbackHandler {
                 'Una volta completato, usa il pulsante per confermare.',
                 {
                     parse_mode: 'Markdown',
-                    ...Keyboards.getPaymentConfirmationKeyboard()
+                    reply_markup: Keyboards.getPaymentConfirmationKeyboard().reply_markup
                 }
             );
         });
@@ -671,6 +711,43 @@ class CallbackHandler {
             );
             ctx.session.waitingFor = 'payment_proof';
         });
+
+        // Nuovo callback per gestione selezione pagamento specifico
+        this.bot.bot.action(/^select_payment_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const transactionId = ctx.match[1];
+            
+            const transaction = await this.bot.transactionService.getTransaction(transactionId);
+            if (!transaction) {
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Transazione non trovata.');
+                return;
+            }
+            
+            if (transaction.buyerId !== ctx.from.id) {
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Non sei autorizzato per questa transazione.');
+                return;
+            }
+            
+            const announcement = await this.bot.announcementService.getAnnouncement(transaction.announcementId);
+            const amount = announcement && transaction.declaredKwh ? 
+                (transaction.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+            
+            // Salva l'ID nella sessione
+            ctx.session.currentTransactionId = transactionId;
+            
+            await ctx.editMessageText(
+                `💳 **PROCEDI CON IL PAGAMENTO**\n\n` +
+                `🆔 Transazione: \`${transactionId}\`\n` +
+                `⚡ KWH confermati: ${transaction.declaredKwh || 'N/A'}\n` +
+                `💰 Importo: €${amount}\n` +
+                `💳 Metodi accettati: ${announcement?.paymentMethods || 'Come concordato'}\n\n` +
+                `Effettua il pagamento secondo i metodi concordati, poi conferma.`,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: Keyboards.getPaymentConfirmationKeyboard().reply_markup
+                }
+            );
+        });
     }
 
     setupAnnouncementCallbacks() {
@@ -680,7 +757,7 @@ class CallbackHandler {
             
             const announcement = await this.bot.findAnnouncementByShortId(shortId, ctx.from.id);
             if (!announcement) {
-                await ctx.editMessageText('❌ Annuncio non trovato.', { reply_markup: undefined });
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Annuncio non trovato.');
                 return;
             }
             
@@ -692,11 +769,12 @@ class CallbackHandler {
             
             const escapedText = detailText.replace(/_/g, '\\_');
             
-            await ctx.editMessageText(
+            await this.bot.chatCleaner.editOrReplace(ctx,
                 `📋 **DETTAGLI ANNUNCIO**\n\n${escapedText}`,
                 {
                     parse_mode: 'Markdown',
-                    ...Keyboards.getAnnouncementActionsKeyboard(announcement.announcementId)
+                    reply_markup: Keyboards.getAnnouncementActionsKeyboard(announcement.announcementId).reply_markup,
+                    messageType: 'announcement_details'
                 }
             );
         });
@@ -707,7 +785,7 @@ class CallbackHandler {
             
             const announcement = await this.bot.findAnnouncementByShortId(shortId, ctx.from.id);
             if (!announcement) {
-                await ctx.editMessageText('❌ Annuncio non trovato.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Annuncio non trovato.');
                 return;
             }
             
@@ -715,7 +793,7 @@ class CallbackHandler {
                 '⚠️ **Sei sicuro di voler eliminare questo annuncio?**\n\nQuesta azione è irreversibile.',
                 {
                     parse_mode: 'Markdown',
-                    ...Keyboards.getConfirmDeleteKeyboard(announcement.announcementId)
+                    reply_markup: Keyboards.getConfirmDeleteKeyboard(announcement.announcementId).reply_markup
                 }
             );
         });
@@ -726,7 +804,7 @@ class CallbackHandler {
             
             const announcement = await this.bot.findAnnouncementByShortId(shortId, ctx.from.id);
             if (!announcement) {
-                await ctx.editMessageText('❌ Annuncio non trovato.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Annuncio non trovato.');
                 return;
             }
             
@@ -741,13 +819,14 @@ class CallbackHandler {
                     }
                 }
                 
-                await ctx.editMessageText('✅ Annuncio eliminato con successo.');
-                setTimeout(() => {
-                    ctx.deleteMessage().catch(() => {});
-                    ctx.reply('Usa il menu per altre operazioni:', Keyboards.MAIN_MENU);
-                }, 2000);
+                await this.bot.chatCleaner.sendConfirmationMessage(ctx, '✅ Annuncio eliminato con successo.');
+                
+                // Torna al menu dopo 3 secondi
+                setTimeout(async () => {
+                    await this.bot.chatCleaner.resetUserChat(ctx);
+                }, 3000);
             } else {
-                await ctx.editMessageText('❌ Errore durante l\'eliminazione.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Errore durante l\'eliminazione.');
             }
         });
 
@@ -757,7 +836,7 @@ class CallbackHandler {
             
             const announcement = await this.bot.findAnnouncementByShortId(shortId, ctx.from.id);
             if (!announcement) {
-                await ctx.editMessageText('❌ Annuncio non trovato.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Annuncio non trovato.');
                 return;
             }
             
@@ -773,7 +852,7 @@ class CallbackHandler {
                 `📋 **DETTAGLI ANNUNCIO**\n\n${escapedText}`,
                 {
                     parse_mode: 'Markdown',
-                    ...Keyboards.getAnnouncementActionsKeyboard(announcement.announcementId)
+                    reply_markup: Keyboards.getAnnouncementActionsKeyboard(announcement.announcementId).reply_markup
                 }
             );
         });
@@ -784,7 +863,7 @@ class CallbackHandler {
             
             const announcement = await this.bot.findAnnouncementByShortId(shortId, ctx.from.id);
             if (!announcement) {
-                await ctx.editMessageText('❌ Annuncio non trovato.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Annuncio non trovato.');
                 return;
             }
             
@@ -824,7 +903,7 @@ class CallbackHandler {
             const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
             
             if (!transactionIdMatch) {
-                await ctx.reply('❌ ID transazione non trovato.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ ID transazione non trovato.');
                 return;
             }
             
@@ -842,8 +921,8 @@ class CallbackHandler {
             );
 
             try {
-                await ctx.telegram.sendMessage(
-                    transaction.buyerId,
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                     `⚡ *RICARICA ATTIVATA!*\n\n` +
                     `Il venditore ha attivato la ricarica.\n` +
                     `Controlla il connettore e conferma se la ricarica è iniziata.\n\n` +
@@ -854,17 +933,16 @@ class CallbackHandler {
                     `ID Transazione: \`${transactionId}\``,
                     {
                         parse_mode: 'Markdown',
-                        ...Keyboards.getBuyerChargingConfirmKeyboard()
+                        reply_markup: Keyboards.getBuyerChargingConfirmKeyboard().reply_markup
                     }
                 );
             } catch (error) {
                 console.error('Error notifying buyer:', error);
             }
 
-            await ctx.editMessageText(
+            await this.bot.chatCleaner.sendConfirmationMessage(ctx,
                 '⚡ Ricarica attivata!\n\n' +
-                'In attesa della conferma dall\'acquirente che la ricarica sia iniziata correttamente.',
-                { parse_mode: 'Markdown' }
+                'In attesa della conferma dall\'acquirente che la ricarica sia iniziata correttamente.'
             );
         });
 
@@ -882,12 +960,12 @@ class CallbackHandler {
                         message += `\n\nID Transazione: \`${transactionId}\``;
                     }
                     
-                    await ctx.telegram.sendMessage(
-                        ctx.from.id,
+                    await this.bot.chatCleaner.sendPersistentMessage(
+                        { telegram: ctx.telegram, from: { id: ctx.from.id } },
                         message,
                         {
                             parse_mode: 'Markdown',
-                            ...Keyboards.getActivateChargingKeyboard()
+                            reply_markup: Keyboards.getActivateChargingKeyboard().reply_markup
                         }
                     );
                 } catch (error) {
@@ -895,134 +973,9 @@ class CallbackHandler {
                 }
             }, 5 * 60 * 1000); // 5 minutes
 
-            await ctx.editMessageText(
+            await this.bot.chatCleaner.sendConfirmationMessage(ctx,
                 '⏸️ Ricarica rimandata di 5 minuti.\n\n' +
-                'Riceverai un promemoria quando sarà il momento di attivare.',
-                { parse_mode: 'Markdown' }
-            );
-        });
-
-        this.bot.bot.action('technical_issues', async (ctx) => {
-            await ctx.answerCbQuery();
-            
-            const messageText = ctx.callbackQuery.message.text;
-            const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
-            const transactionId = transactionIdMatch ? transactionIdMatch[1] : null;
-            
-            const keyboard = {
-                inline_keyboard: [
-                    [{ text: '🔌 Colonnina non risponde', callback_data: `issue_charger_${transactionId}` }],
-                    [{ text: '❌ Errore attivazione', callback_data: `issue_activation_${transactionId}` }],
-                    [{ text: '📱 Problema app', callback_data: `issue_app_${transactionId}` }],
-                    [{ text: '📞 Contatta admin', callback_data: `call_admin_${transactionId}` }]
-                ]
-            };
-            
-            await ctx.editMessageText(
-                '⚠️ *Problemi tecnici rilevati*\n\n' +
-                'Seleziona il tipo di problema:',
-                {
-                    parse_mode: 'Markdown',
-                    reply_markup: keyboard
-                }
-            );
-        });
-
-        this.bot.bot.action(/^issue_(charger|activation|app)_(.+)$/, async (ctx) => {
-            await ctx.answerCbQuery();
-            
-            const issueType = ctx.match[1];
-            const transactionId = ctx.match[2];
-            
-            if (!transactionId || transactionId === 'null') {
-                await ctx.reply('❌ ID transazione non trovato.');
-                return;
-            }
-            
-            const transaction = await this.bot.transactionService.getTransaction(transactionId);
-            if (!transaction) {
-                await ctx.editMessageText('❌ Transazione non trovata.');
-                return;
-            }
-            
-            await this.bot.transactionService.addTransactionIssue(
-                transactionId,
-                `Problema: ${issueType}`,
-                ctx.from.id
-            );
-            
-            try {
-                await ctx.telegram.sendMessage(
-                    transaction.buyerId,
-                    `⚠️ *Problema tecnico segnalato*\n\n` +
-                    `Il venditore sta riscontrando problemi con: ${issueType}\n` +
-                    `Sta lavorando per risolverlo.\n\n` +
-                    `Ti terremo aggiornato.`,
-                    { parse_mode: 'Markdown' }
-                );
-            } catch (error) {
-                console.error('Error notifying buyer:', error);
-            }
-            
-            await ctx.editMessageText(
-                '📝 Problema registrato.\n\n' +
-                'L\'acquirente è stato informato. Riprova l\'attivazione quando possibile.',
-                {
-                    parse_mode: 'Markdown',
-                    reply_markup: {
-                        inline_keyboard: [[
-                            { text: '🔄 Riprova attivazione', callback_data: `retry_activation_${transactionId}` }
-                        ]]
-                    }
-                }
-            );
-        });
-
-        this.bot.bot.action(/^retry_activation_(.+)$/, async (ctx) => {
-            await ctx.answerCbQuery();
-            
-            const transactionId = ctx.match[1];
-            
-            await ctx.editMessageText(
-                '🔄 Riprova ad attivare la ricarica quando sei pronto.\n\n' +
-                `ID Transazione: \`${transactionId}\``,
-                {
-                    parse_mode: 'Markdown',
-                    ...Keyboards.getActivateChargingKeyboard()
-                }
-            );
-        });
-
-        this.bot.bot.action(/^call_admin_(.+)$/, async (ctx) => {
-            await ctx.answerCbQuery();
-            
-            const transactionId = ctx.match[1];
-            
-            if (!transactionId || transactionId === 'null') {
-                await ctx.reply('❌ ID transazione non trovato.');
-                return;
-            }
-            
-            const adminMessage = Messages.formatAdminAlert(
-                transactionId,
-                'Richiesta aiuto per problemi tecnici',
-                ctx.from.username || ctx.from.first_name
-            );
-
-            try {
-                await ctx.telegram.sendMessage(
-                    this.bot.adminUserId,
-                    adminMessage,
-                    { parse_mode: 'Markdown' }
-                );
-            } catch (error) {
-                console.error('Error notifying admin:', error);
-            }
-
-            await ctx.editMessageText(
-                '📞 Admin contattato!\n\n' +
-                'Un amministratore ti aiuterà il prima possibile.',
-                { parse_mode: 'Markdown' }
+                'Riceverai un promemoria quando sarà il momento di attivare.'
             );
         });
 
@@ -1033,14 +986,14 @@ class CallbackHandler {
             const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
             
             if (!transactionIdMatch) {
-                await ctx.reply('⚠️ Per continuare, inserisci l\'ID della transazione.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '⚠️ Per continuare, inserisci l\'ID della transazione.');
                 return;
             }
             
             const transactionId = transactionIdMatch[1];
             ctx.session.transactionId = transactionId;
             ctx.session.chargingConfirmed = true;
-            await ctx.scene.enter('transactionScene');
+            await this.bot.chatCleaner.enterScene(ctx, 'transactionScene');
         });
 
         this.bot.bot.action('charging_failed', async (ctx) => {
@@ -1050,7 +1003,7 @@ class CallbackHandler {
             const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
             
             if (!transactionIdMatch) {
-                await ctx.reply('⚠️ ID transazione non trovato.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '⚠️ ID transazione non trovato.');
                 return;
             }
             
@@ -1065,12 +1018,12 @@ class CallbackHandler {
             const retryCount = await this.bot.transactionService.incrementRetryCount(transactionId);
             
             try {
-                await ctx.telegram.sendMessage(
-                    transaction.sellerId,
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.sellerId } },
                     Messages.CHARGING_FAILED_RETRY + `\n\nID Transazione: \`${transactionId}\``,
                     {
                         parse_mode: 'Markdown',
-                        ...Keyboards.getRetryActivationKeyboard(retryCount)
+                        reply_markup: Keyboards.getRetryActivationKeyboard(retryCount).reply_markup
                     }
                 );
             } catch (error) {
@@ -1105,8 +1058,8 @@ class CallbackHandler {
                 const amount = announcement && transaction.declaredKwh ? 
                     (transaction.declaredKwh * announcement.price).toFixed(2) : 'N/A';
                 
-                await ctx.telegram.sendMessage(
-                    transaction.buyerId,
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                     `✅ *KWH CONFERMATI DAL VENDITORE*\n\n` +
                     `Il venditore ha confermato la ricezione di ${transaction.declaredKwh || 'N/A'} KWH.\n\n` +
                     `💳 *Procedi con il pagamento*\n` +
@@ -1116,7 +1069,7 @@ class CallbackHandler {
                     `🔍 ID Transazione: \`${transaction.transactionId}\``,
                     {
                         parse_mode: 'Markdown',
-                        ...Keyboards.getPaymentConfirmationKeyboard()
+                        reply_markup: Keyboards.getPaymentConfirmationKeyboard().reply_markup
                     }
                 );
 
@@ -1165,7 +1118,7 @@ class CallbackHandler {
             } else if (ctx.session.completedTransactionId) {
                 transactionId = ctx.session.completedTransactionId;
             } else {
-                await ctx.reply('❌ ID transazione non trovato.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ ID transazione non trovato.');
                 return;
             }
             
@@ -1193,17 +1146,17 @@ class CallbackHandler {
                     ''
                 );
 
-                await ctx.editMessageText(
+                await this.bot.chatCleaner.sendConfirmationMessage(ctx,
                     '⭐ Grazie per il feedback!\n\n' +
-                    'La transazione è stata completata con successo.',
-                    { reply_markup: undefined }
+                    'La transazione è stata completata con successo.'
                 );
 
                 delete ctx.session.completedTransactionId;
                 
-                setTimeout(() => {
-                    ctx.reply('Usa il menu per altre operazioni:', Keyboards.MAIN_MENU);
-                }, 1000);
+                // Torna al menu dopo 3 secondi
+                setTimeout(async () => {
+                    await this.bot.chatCleaner.resetUserChat(ctx);
+                }, 3000);
             }
         });
     }
@@ -1224,7 +1177,7 @@ class CallbackHandler {
             
             await ctx.editMessageText(helpText, {
                 parse_mode: 'Markdown',
-                ...Keyboards.getBackToMainMenuKeyboard()
+                reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
             });
         });
 
@@ -1246,7 +1199,7 @@ class CallbackHandler {
             
             await ctx.editMessageText(helpText, {
                 parse_mode: 'Markdown',
-                ...Keyboards.getBackToMainMenuKeyboard()
+                reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
             });
         });
 
@@ -1269,7 +1222,7 @@ class CallbackHandler {
             
             await ctx.editMessageText(helpText, {
                 parse_mode: 'Markdown',
-                ...Keyboards.getBackToMainMenuKeyboard()
+                reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
             });
         });
 
@@ -1290,7 +1243,7 @@ class CallbackHandler {
             
             await ctx.editMessageText(faqText, {
                 parse_mode: 'Markdown',
-                ...Keyboards.getBackToMainMenuKeyboard()
+                reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
             });
         });
 
@@ -1304,7 +1257,7 @@ class CallbackHandler {
                 `Usa il pulsante "Chiama admin" durante le transazioni.`,
                 {
                     parse_mode: 'Markdown',
-                    ...Keyboards.getBackToMainMenuKeyboard()
+                    reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
                 }
             );
         });
@@ -1329,8 +1282,9 @@ class CallbackHandler {
             (transaction.declaredKwh * announcement.price).toFixed(2) : 'N/A';
         
         try {
-            await ctx.telegram.sendMessage(
-                transaction.sellerId,
+            // Messaggio importante per il seller - mantieni persistente
+            await this.bot.chatCleaner.sendPersistentMessage(
+                { telegram: ctx.telegram, from: { id: transaction.sellerId } },
                 `💳 **DICHIARAZIONE PAGAMENTO**\n\n` +
                 `L'acquirente @${ctx.from.username || ctx.from.first_name} dichiara di aver pagato.\n\n` +
                 `💰 Importo dichiarato: €${amount}\n` +
@@ -1339,7 +1293,7 @@ class CallbackHandler {
                 `Hai ricevuto il pagamento?`,
                 {
                     parse_mode: 'Markdown',
-                    ...Keyboards.getSellerPaymentConfirmKeyboard()
+                    reply_markup: Keyboards.getSellerPaymentConfirmKeyboard().reply_markup
                 }
             );
             
@@ -1349,6 +1303,7 @@ class CallbackHandler {
             console.error('Error notifying seller:', error);
         }
 
+        // Messaggio di conferma che si auto-elimina
         await ctx.editMessageText(
             `✅ **DICHIARAZIONE PAGAMENTO INVIATA!**\n\n` +
             `🆔 Transazione: \`${transactionId}\`\n` +
@@ -1357,7 +1312,11 @@ class CallbackHandler {
             `Riceverai aggiornamenti sullo stato della transazione.`,
             { 
                 parse_mode: 'Markdown',
-                reply_markup: undefined
+                reply_markup: {
+                    inline_keyboard: [[
+                        { text: '🏠 Torna al menu', callback_data: 'back_to_main' }
+                    ]]
+                }
             }
         );
     }
