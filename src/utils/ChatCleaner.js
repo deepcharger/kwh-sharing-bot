@@ -175,45 +175,58 @@ class ChatCleaner {
         }
     }
 
-    // Invia messaggio con auto-eliminazione
+    // Invia messaggio con auto-eliminazione MA con tastiera persistente
     async sendTemporaryMessage(ctx, text, options = {}, autoDeleteMs = 5000) {
-        const sentMessage = await ctx.reply(text, options);
+        const Keyboards = require('./Keyboards');
         
-        this.saveMessageForCleanup(
-            ctx.from.id,
-            sentMessage.message_id,
-            'temporary',
-            autoDeleteMs
-        );
+        // FIX: Assicurati che la tastiera persistente sia sempre presente
+        const finalOptions = {
+            ...options,
+            reply_markup: options.reply_markup || Keyboards.MAIN_MENU.reply_markup
+        };
         
-        return sentMessage;
+        try {
+            const sentMessage = await ctx.reply(text, finalOptions);
+            
+            this.saveMessageForCleanup(
+                ctx.from.id,
+                sentMessage.message_id,
+                'temporary',
+                autoDeleteMs
+            );
+            
+            return sentMessage;
+        } catch (error) {
+            console.error('Error in sendTemporaryMessage:', error);
+            return null;
+        }
     }
 
-    // Pulizia completa chat utente e ritorno al menu
+    // FIX PRINCIPALE: Pulizia completa chat utente e ritorno al menu
     async resetUserChat(ctx) {
         // Elimina tutti i messaggi temporanei e di navigazione
         await this.cleanupUserMessages(ctx, ['temporary', 'navigation', 'confirmation']);
         
-        // Invia menu principale pulito
+        // FIX: Usa Keyboards.MAIN_MENU correttamente
+        const Keyboards = require('./Keyboards');
+        
         return await ctx.reply(
             '🏠 **Menu Principale**\n\nSeleziona un\'opzione:',
             {
                 parse_mode: 'Markdown',
-                reply_markup: this.bot.bot.telegraf?.extra?.markdown()?.markup?.keyboard([
-                    ['🔋 Vendi KWH', '📥 Richieste pendenti'],
-                    ['📊 I miei annunci', '💼 Le mie transazioni'],
-                    ['⭐ I miei feedback', '❓ Aiuto']
-                ]).resize().persistent() || undefined,
-                messageType: 'menu'
+                reply_markup: Keyboards.MAIN_MENU.reply_markup // ✅ CORRETTO!
             }
         );
     }
 
     // Gestione messaggi di conferma con auto-eliminazione
     async sendConfirmationMessage(ctx, text, options = {}) {
+        const Keyboards = require('./Keyboards');
+        
         const sentMessage = await ctx.reply(text, {
             ...options,
-            parse_mode: options.parse_mode || 'Markdown'
+            parse_mode: options.parse_mode || 'Markdown',
+            reply_markup: options.reply_markup || Keyboards.MAIN_MENU.reply_markup
         });
         
         // Auto-elimina dopo 5 secondi
@@ -229,9 +242,12 @@ class ChatCleaner {
 
     // Gestione messaggi di errore con auto-eliminazione
     async sendErrorMessage(ctx, text, options = {}) {
+        const Keyboards = require('./Keyboards');
+        
         const sentMessage = await ctx.reply(text, {
             ...options,
-            parse_mode: 'Markdown'
+            parse_mode: 'Markdown',
+            reply_markup: options.reply_markup || Keyboards.MAIN_MENU.reply_markup
         });
         
         // Auto-elimina dopo 8 secondi
