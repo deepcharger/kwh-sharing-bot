@@ -11,9 +11,6 @@ class MessageHandler {
         this.bot.bot.on('text', async (ctx, next) => {
             const text = ctx.message.text.trim();
             
-            // FIX: Rimosso il sistema di inserimento manuale ID transazione
-            // Non è più necessario perché ora l'ID viene rilevato automaticamente
-            
             // Check if we're waiting for rejection reason
             if (ctx.session?.waitingForRejectionReason && ctx.session?.rejectingTransactionId) {
                 const reason = ctx.message.text;
@@ -260,65 +257,9 @@ class MessageHandler {
             );
         });
 
-        // FIX: Aggiunti callback per gestione pagamenti specifici
-        this.bot.bot.action(/^select_payment_(.+)$/, async (ctx) => {
-            await ctx.answerCbQuery();
-            const transactionId = ctx.match[1];
-            
-            const transaction = await this.bot.transactionService.getTransaction(transactionId);
-            if (!transaction) {
-                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Transazione non trovata.');
-                return;
-            }
-            
-            if (transaction.buyerId !== ctx.from.id) {
-                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Non sei autorizzato per questa transazione.');
-                return;
-            }
-            
-            const announcement = await this.bot.announcementService.getAnnouncement(transaction.announcementId);
-            const amount = announcement && transaction.declaredKwh ? 
-                (transaction.declaredKwh * announcement.price).toFixed(2) : 'N/A';
-            
-            // Salva l'ID nella sessione
-            ctx.session.currentTransactionId = transactionId;
-            
-            await this.bot.chatCleaner.editOrReplace(ctx,
-                `💳 **PROCEDI CON IL PAGAMENTO**\n\n` +
-                `🆔 Transazione: \`${transactionId}\`\n` +
-                `⚡ KWH confermati: ${transaction.declaredKwh || 'N/A'}\n` +
-                `💰 Importo: €${amount}\n` +
-                `💳 Metodi accettati: ${announcement?.paymentMethods || 'Come concordato'}\n\n` +
-                `Effettua il pagamento secondo i metodi concordati, poi conferma.`,
-                {
-                    parse_mode: 'Markdown',
-                    reply_markup: Keyboards.getPaymentConfirmationKeyboard().reply_markup,
-                    messageType: 'payment'
-                }
-            );
-        });
-
-        // FIX: Nuovo callback per gestire lo stato "sto ancora pagando"
-        this.bot.bot.action('payment_in_progress', async (ctx) => {
-            await ctx.answerCbQuery();
-            
-            await ctx.editMessageText(
-                '⏰ **PAGAMENTO IN CORSO**\n\n' +
-                'Hai indicato che stai ancora effettuando il pagamento.\n\n' +
-                'Una volta completato, torna qui e premi "Ho effettuato il pagamento".',
-                {
-                    parse_mode: 'Markdown',
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: '✅ Ora ho completato il pagamento', callback_data: 'payment_completed' }],
-                            [{ text: '❌ Ho ancora problemi', callback_data: 'payment_issues' }],
-                            [{ text: '🏠 Torna al menu', callback_data: 'back_to_main' }]
-                        ]
-                    }
-                }
-            );
-        });
-
+        // RIMOSSO: ❌ Callback duplicati select_payment_ e payment_in_progress
+        // Questi sono già gestiti in CallbackHandler.js
+        
         // Handle unexpected messages
         this.bot.bot.on('message', async (ctx) => {
             // Solo se non siamo in una scene
