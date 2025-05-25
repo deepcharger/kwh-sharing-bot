@@ -24,7 +24,7 @@ class MessageHandler {
                 
                 const transaction = await this.bot.transactionService.getTransaction(transactionId);
                 if (!transaction) {
-                    await ctx.reply('❌ Transazione non trovata.');
+                    await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Transazione non trovata.');
                     return;
                 }
                 
@@ -35,8 +35,8 @@ class MessageHandler {
                 );
 
                 try {
-                    await ctx.telegram.sendMessage(
-                        transaction.buyerId,
+                    await this.bot.chatCleaner.sendPersistentMessage(
+                        { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                         `❌ *Richiesta rifiutata*\n\n` +
                         `Il venditore ha rifiutato la tua richiesta.\n` +
                         `Motivo: ${reason}\n\n` +
@@ -47,10 +47,14 @@ class MessageHandler {
                     console.error('Error notifying buyer:', error);
                 }
 
-                await ctx.reply(
-                    '❌ Richiesta rifiutata. L\'acquirente è stato notificato.',
-                    Keyboards.MAIN_MENU
+                await this.bot.chatCleaner.sendConfirmationMessage(ctx,
+                    '❌ Richiesta rifiutata. L\'acquirente è stato notificato.'
                 );
+                
+                // Torna al menu dopo 3 secondi
+                setTimeout(async () => {
+                    await this.bot.chatCleaner.resetUserChat(ctx);
+                }, 3000);
                 
                 return;
             }
@@ -68,10 +72,9 @@ class MessageHandler {
                     reason
                 );
 
-                await ctx.reply(
+                await this.bot.chatCleaner.sendConfirmationMessage(ctx,
                     '⭐ Grazie per il feedback!\n\n' +
-                    'Il tuo commento aiuterà a migliorare il servizio.',
-                    Keyboards.MAIN_MENU
+                    'Il tuo commento aiuterà a migliorare il servizio.'
                 );
 
                 // Clear session
@@ -79,6 +82,11 @@ class MessageHandler {
                 delete ctx.session.feedbackRating;
                 delete ctx.session.feedbackTargetUserId;
                 delete ctx.session.transaction;
+                
+                // Torna al menu dopo 3 secondi
+                setTimeout(async () => {
+                    await this.bot.chatCleaner.resetUserChat(ctx);
+                }, 3000);
                 
                 return;
             }
@@ -91,7 +99,7 @@ class MessageHandler {
                 // Trova la transazione usando il short ID
                 const transaction = await this.bot.findTransactionByShortId(shortId, ctx.from.id);
                 if (!transaction) {
-                    await ctx.reply('❌ Transazione non trovata.');
+                    await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Transazione non trovata.');
                     return;
                 }
                 
@@ -102,8 +110,8 @@ class MessageHandler {
                 );
                 
                 try {
-                    await ctx.telegram.sendMessage(
-                        transaction.buyerId,
+                    await this.bot.chatCleaner.sendPersistentMessage(
+                        { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                         `⚠️ *Problema con i KWH dichiarati*\n\n` +
                         `Il venditore segnala: ${reason}\n\n` +
                         `Controlla nuovamente la foto e rispondi al venditore.`,
@@ -113,16 +121,20 @@ class MessageHandler {
                     console.error('Error notifying buyer:', error);
                 }
                 
-                await ctx.reply(
+                await this.bot.chatCleaner.sendConfirmationMessage(ctx,
                     '⚠️ Problema segnalato all\'acquirente.\n\n' +
-                    'Potete chiarire privatamente la questione.',
-                    Keyboards.MAIN_MENU
+                    'Potete chiarire privatamente la questione.'
                 );
                 
                 // Clear session
                 delete ctx.session.disputingKwh;
                 delete ctx.session.disputeTransactionId;
                 delete ctx.session.waitingFor;
+                
+                // Torna al menu dopo 5 secondi
+                setTimeout(async () => {
+                    await this.bot.chatCleaner.resetUserChat(ctx);
+                }, 5000);
                 
                 return;
             }
@@ -150,7 +162,9 @@ class MessageHandler {
                     if (paymentPending.length === 1) {
                         transactionId = paymentPending[0].transactionId;
                     } else {
-                        await ctx.reply('❌ Non riesco a identificare la transazione. Riprova dal menu pagamenti.');
+                        await this.bot.chatCleaner.sendErrorMessage(ctx, 
+                            '❌ Non riesco a identificare la transazione. Riprova dal menu pagamenti.'
+                        );
                         delete ctx.session.waitingFor;
                         return;
                     }
@@ -158,7 +172,7 @@ class MessageHandler {
                 
                 const transaction = await this.bot.transactionService.getTransaction(transactionId);
                 if (!transaction) {
-                    await ctx.reply('❌ Transazione non trovata.');
+                    await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Transazione non trovata.');
                     delete ctx.session.waitingFor;
                     return;
                 }
@@ -168,14 +182,19 @@ class MessageHandler {
                         caption: `📷 Prova di pagamento dall'acquirente @${ctx.from.username || ctx.from.first_name}\n\nTransazione: ${transactionId}`
                     });
                     
-                    await ctx.reply(
+                    await this.bot.chatCleaner.sendConfirmationMessage(ctx,
                         '✅ Prova di pagamento inviata al venditore.\n\n' +
-                        'Attendi la conferma.',
-                        Keyboards.MAIN_MENU
+                        'Attendi la conferma.'
                     );
+                    
+                    // Torna al menu dopo 5 secondi
+                    setTimeout(async () => {
+                        await this.bot.chatCleaner.resetUserChat(ctx);
+                    }, 5000);
+                    
                 } catch (error) {
                     console.error('Error forwarding payment proof:', error);
-                    await ctx.reply('❌ Errore nell\'invio. Riprova.');
+                    await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Errore nell\'invio. Riprova.');
                 }
                 
                 delete ctx.session.waitingFor;
@@ -184,37 +203,61 @@ class MessageHandler {
             
             // Handle photos in scenes or other contexts
             if (!ctx.scene) {
-                await ctx.reply('❌ Non aspettavo una foto in questo momento.');
+                await this.bot.chatCleaner.sendTemporaryMessage(ctx,
+                    '❌ Non aspettavo una foto in questo momento.',
+                    {},
+                    3000
+                );
             }
         });
 
         // Handle documents
         this.bot.bot.on('document', async (ctx) => {
             if (!ctx.scene) {
-                await ctx.reply('❌ Non accetto documenti in questo momento.');
+                await this.bot.chatCleaner.sendTemporaryMessage(ctx,
+                    '❌ Non accetto documenti in questo momento.',
+                    {},
+                    3000
+                );
             }
         });
 
         // Handle locations
         this.bot.bot.on('location', async (ctx) => {
             if (!ctx.scene) {
-                await ctx.reply('❌ Non aspettavo una posizione in questo momento.');
+                await this.bot.chatCleaner.sendTemporaryMessage(ctx,
+                    '❌ Non aspettavo una posizione in questo momento.',
+                    {},
+                    3000
+                );
             }
         });
 
         // Handle voice messages
         this.bot.bot.on('voice', async (ctx) => {
-            await ctx.reply('❌ I messaggi vocali non sono supportati. Scrivi il testo.');
+            await this.bot.chatCleaner.sendTemporaryMessage(ctx,
+                '❌ I messaggi vocali non sono supportati. Scrivi il testo.',
+                {},
+                5000
+            );
         });
 
         // Handle stickers
         this.bot.bot.on('sticker', async (ctx) => {
-            await ctx.reply('❌ Gli sticker non sono supportati in questo bot.');
+            await this.bot.chatCleaner.sendTemporaryMessage(ctx,
+                '❌ Gli sticker non sono supportati in questo bot.',
+                {},
+                3000
+            );
         });
 
         // Handle video
         this.bot.bot.on('video', async (ctx) => {
-            await ctx.reply('❌ I video non sono supportati. Invia foto per documentare le transazioni.');
+            await this.bot.chatCleaner.sendTemporaryMessage(ctx,
+                '❌ I video non sono supportati. Invia foto per documentare le transazioni.',
+                {},
+                5000
+            );
         });
 
         // FIX: Aggiunti callback per gestione pagamenti specifici
@@ -224,12 +267,12 @@ class MessageHandler {
             
             const transaction = await this.bot.transactionService.getTransaction(transactionId);
             if (!transaction) {
-                await ctx.editMessageText('❌ Transazione non trovata.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Transazione non trovata.');
                 return;
             }
             
             if (transaction.buyerId !== ctx.from.id) {
-                await ctx.editMessageText('❌ Non sei autorizzato per questa transazione.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Non sei autorizzato per questa transazione.');
                 return;
             }
             
@@ -240,7 +283,7 @@ class MessageHandler {
             // Salva l'ID nella sessione
             ctx.session.currentTransactionId = transactionId;
             
-            await ctx.editMessageText(
+            await this.bot.chatCleaner.editOrReplace(ctx,
                 `💳 **PROCEDI CON IL PAGAMENTO**\n\n` +
                 `🆔 Transazione: \`${transactionId}\`\n` +
                 `⚡ KWH confermati: ${transaction.declaredKwh || 'N/A'}\n` +
@@ -249,7 +292,8 @@ class MessageHandler {
                 `Effettua il pagamento secondo i metodi concordati, poi conferma.`,
                 {
                     parse_mode: 'Markdown',
-                    ...Keyboards.getPaymentConfirmationKeyboard()
+                    reply_markup: Keyboards.getPaymentConfirmationKeyboard().reply_markup,
+                    messageType: 'payment'
                 }
             );
         });
@@ -273,6 +317,18 @@ class MessageHandler {
                     }
                 }
             );
+        });
+
+        // Handle unexpected messages
+        this.bot.bot.on('message', async (ctx) => {
+            // Solo se non siamo in una scene
+            if (!ctx.scene) {
+                await this.bot.chatCleaner.sendTemporaryMessage(ctx,
+                    '❌ Messaggio non riconosciuto. Usa i pulsanti del menu o i comandi disponibili.',
+                    {},
+                    5000
+                );
+            }
         });
     }
 }
