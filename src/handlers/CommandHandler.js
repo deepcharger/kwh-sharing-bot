@@ -15,34 +15,35 @@ class CommandHandler {
             if (ctx.message.text.includes('contact_')) {
                 const announcementId = ctx.message.text.split('contact_')[1];
                 ctx.session.announcementId = announcementId;
-                return ctx.scene.enter('contactSellerScene');
+                return await this.bot.chatCleaner.enterScene(ctx, 'contactSellerScene');
             }
             
-            await ctx.reply(Messages.WELCOME, {
-                parse_mode: 'Markdown',
-                ...Keyboards.MAIN_MENU
-            });
+            // Pulisci la chat e mostra il menu
+            await this.bot.chatCleaner.resetUserChat(ctx);
         });
 
         // Help command
         this.bot.bot.command('help', async (ctx) => {
-            await ctx.reply(Messages.HELP_TEXT, {
-                parse_mode: 'Markdown'
+            await this.bot.chatCleaner.replaceMessage(ctx, Messages.HELP_TEXT, {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.getHelpKeyboard().reply_markup,
+                messageType: 'help'
             });
         });
 
         // Admin commands
         this.bot.bot.command('admin', async (ctx) => {
             if (ctx.from.id != this.bot.adminUserId) {
-                await ctx.reply('❌ Non autorizzato.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Non autorizzato.');
                 return;
             }
             
-            await ctx.reply(
+            await this.bot.chatCleaner.replaceMessage(ctx,
                 '👨‍⚖️ **DASHBOARD ADMIN**\n\nSeleziona un\'opzione:',
                 {
                     parse_mode: 'Markdown',
-                    ...Keyboards.getAdminDashboardKeyboard()
+                    reply_markup: Keyboards.getAdminDashboardKeyboard().reply_markup,
+                    messageType: 'admin'
                 }
             );
         });
@@ -68,7 +69,10 @@ class CommandHandler {
                 statsText += `• Prezzo medio: €${(announcementStats.avgPrice || 0).toFixed(2)}/KWH\n`;
             }
             
-            await ctx.reply(statsText, { parse_mode: 'Markdown' });
+            await this.bot.chatCleaner.replaceMessage(ctx, statsText, { 
+                parse_mode: 'Markdown',
+                messageType: 'admin'
+            });
         });
 
         // Quick transaction access by ID
@@ -79,22 +83,22 @@ class CommandHandler {
             const transaction = await this.bot.transactionService.getTransaction(transactionId);
             
             if (!transaction) {
-                await ctx.reply('❌ Transazione non trovata.', Keyboards.MAIN_MENU);
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Transazione non trovata.');
                 return;
             }
             
             // Check if user is involved in this transaction
             if (transaction.sellerId !== userId && transaction.buyerId !== userId) {
-                await ctx.reply('❌ Non sei autorizzato a visualizzare questa transazione.', Keyboards.MAIN_MENU);
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Non sei autorizzato a visualizzare questa transazione.');
                 return;
             }
             
             // Enter transaction scene with this specific transaction
             ctx.session.transactionId = transactionId;
-            await ctx.scene.enter('transactionScene');
+            await this.bot.chatCleaner.enterScene(ctx, 'transactionScene');
         });
 
-        // FIX: Comando pagamenti migliorato
+        // FIX: Comando pagamenti migliorato con pulizia
         this.bot.bot.command('pagamenti', async (ctx) => {
             const userId = ctx.from.id;
             
@@ -105,7 +109,16 @@ class CommandHandler {
             );
             
             if (paymentPending.length === 0) {
-                await ctx.reply('✅ Non hai pagamenti in sospeso.', Keyboards.MAIN_MENU);
+                await this.bot.chatCleaner.sendTemporaryMessage(ctx,
+                    '✅ Non hai pagamenti in sospeso.',
+                    {},
+                    3000
+                );
+                
+                // Torna al menu dopo 3 secondi
+                setTimeout(async () => {
+                    await this.bot.chatCleaner.resetUserChat(ctx);
+                }, 3000);
                 return;
             }
             
@@ -135,29 +148,36 @@ class CommandHandler {
                 // Salva l'ID nella sessione
                 ctx.session.currentTransactionId = tx.transactionId;
                 
-                await ctx.reply(message, {
+                await this.bot.chatCleaner.replaceMessage(ctx, message, {
                     parse_mode: 'Markdown',
-                    ...Keyboards.getPaymentConfirmationKeyboard()
+                    reply_markup: Keyboards.getPaymentConfirmationKeyboard().reply_markup,
+                    messageType: 'payment'
                 });
             } else {
                 // Se ci sono più pagamenti, mostra la lista
                 message += 'Seleziona una transazione per gestire il pagamento:';
                 
-                await ctx.reply(message, {
+                await this.bot.chatCleaner.replaceMessage(ctx, message, {
                     parse_mode: 'Markdown',
                     reply_markup: {
-                        inline_keyboard: paymentPending.map((tx, index) => [{
-                            text: `💳 ${tx.transactionId.slice(-10)} - €${announcement && tx.declaredKwh ? (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A'}`,
-                            callback_data: `select_payment_${tx.transactionId}`
-                        }])
-                    }
+                        inline_keyboard: paymentPending.map((tx, index) => {
+                            const announcement = await this.bot.announcementService.getAnnouncement(tx.announcementId);
+                            const amount = announcement && tx.declaredKwh ? 
+                                (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                            return [{
+                                text: `💳 ${tx.transactionId.slice(-10)} - €${amount}`,
+                                callback_data: `select_payment_${tx.transactionId}`
+                            }];
+                        })
+                    },
+                    messageType: 'payment'
                 });
             }
         });
 
-        // Menu button handlers
+        // Menu button handlers con pulizia
         this.bot.bot.hears('🔋 Vendi KWH', async (ctx) => {
-            await ctx.scene.enter('sellAnnouncementScene');
+            await this.bot.chatCleaner.enterScene(ctx, 'sellAnnouncementScene');
         });
 
         this.bot.bot.hears('📊 I miei annunci', async (ctx) => {
@@ -165,20 +185,29 @@ class CommandHandler {
             const announcements = await this.bot.announcementService.getUserAnnouncements(userId);
             
             if (announcements.length === 0) {
-                await ctx.reply('📭 Non hai ancora pubblicato annunci.', Keyboards.MAIN_MENU);
+                await this.bot.chatCleaner.sendTemporaryMessage(ctx,
+                    '📭 Non hai ancora pubblicato annunci.',
+                    {},
+                    3000
+                );
+                
+                setTimeout(async () => {
+                    await this.bot.chatCleaner.resetUserChat(ctx);
+                }, 3000);
                 return;
             }
 
-            let message = '📊 <b>I TUOI ANNUNCI ATTIVI:</b>\n\n';
+            let message = '📊 **I TUOI ANNUNCI ATTIVI:**\n\n';
             for (const ann of announcements) {
                 message += `🆔 ${ann.announcementId}\n`;
                 message += `💰 ${ann.price}€/KWH\n`;
                 message += `📅 Pubblicato: ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
             }
             
-            await ctx.reply(message, {
-                parse_mode: 'HTML',
-                ...Keyboards.getUserAnnouncementsKeyboard(announcements)
+            await this.bot.chatCleaner.replaceMessage(ctx, message, {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.getUserAnnouncementsKeyboard(announcements).reply_markup,
+                messageType: 'navigation'
             });
         });
 
@@ -189,7 +218,15 @@ class CommandHandler {
             const allTransactions = await this.bot.transactionService.getUserTransactions(userId, 'all');
             
             if (allTransactions.length === 0) {
-                await ctx.reply('📭 Non hai ancora transazioni.', Keyboards.MAIN_MENU);
+                await this.bot.chatCleaner.sendTemporaryMessage(ctx,
+                    '📭 Non hai ancora transazioni.',
+                    {},
+                    3000
+                );
+                
+                setTimeout(async () => {
+                    await this.bot.chatCleaner.resetUserChat(ctx);
+                }, 3000);
                 return;
             }
 
@@ -221,9 +258,10 @@ class CommandHandler {
             message += `❌ **Annullate:** ${cancelled.length}\n\n`;
             message += `Seleziona una transazione per gestirla:`;
             
-            await ctx.reply(message, {
+            await this.bot.chatCleaner.replaceMessage(ctx, message, {
                 parse_mode: 'Markdown',
-                ...Keyboards.getTransactionsKeyboard(pending, completed)
+                reply_markup: Keyboards.getTransactionsKeyboard(pending, completed).reply_markup,
+                messageType: 'navigation'
             });
         });
 
@@ -240,9 +278,20 @@ class CommandHandler {
             const pendingRequests = pendingTransactions.filter(t => t.status === 'pending_seller_confirmation');
             
             if (pendingRequests.length === 0) {
-                await ctx.reply('📭 Non hai richieste di acquisto in attesa.', Keyboards.MAIN_MENU);
+                await this.bot.chatCleaner.sendTemporaryMessage(ctx,
+                    '📭 Non hai richieste di acquisto in attesa.',
+                    {},
+                    3000
+                );
+                
+                setTimeout(async () => {
+                    await this.bot.chatCleaner.resetUserChat(ctx);
+                }, 3000);
                 return;
             }
+
+            // Pulisci messaggi precedenti prima di mostrare le richieste
+            await this.bot.chatCleaner.cleanupUserMessages(ctx, ['temporary', 'navigation']);
 
             // Process each request
             for (const transaction of pendingRequests) {
@@ -280,7 +329,8 @@ class CommandHandler {
                         ]
                     };
                     
-                    await ctx.reply(requestText, {
+                    // Invia come messaggio persistente
+                    await this.bot.chatCleaner.sendPersistentMessage(ctx, requestText, {
                         parse_mode: 'Markdown',
                         reply_markup: keyboard
                     });
@@ -293,13 +343,11 @@ class CommandHandler {
                 }
             }
             
-            await ctx.reply(
+            await this.bot.chatCleaner.sendTemporaryMessage(ctx,
                 `📥 Hai ${pendingRequests.length} richieste in attesa.\n\n` +
                 `Gestiscile una alla volta usando i pulsanti sopra.`,
-                {
-                    parse_mode: 'Markdown',
-                    ...Keyboards.MAIN_MENU
-                }
+                {},
+                10000 // Auto-elimina dopo 10 secondi
             );
         });
 
@@ -308,21 +356,22 @@ class CommandHandler {
             const userStats = await this.bot.userService.getUserStats(userId);
             
             if (!userStats) {
-                await ctx.reply('❌ Errore nel recupero delle statistiche.', Keyboards.MAIN_MENU);
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Errore nel recupero delle statistiche.');
                 return;
             }
             
             const statsText = Messages.formatUserStats(userStats);
-            await ctx.reply(statsText, {
+            await this.bot.chatCleaner.replaceMessage(ctx, statsText, {
                 parse_mode: 'Markdown',
-                ...Keyboards.MAIN_MENU
+                messageType: 'stats'
             });
         });
 
         this.bot.bot.hears('❓ Aiuto', async (ctx) => {
-            await ctx.reply(Messages.HELP_TEXT, {
+            await this.bot.chatCleaner.replaceMessage(ctx, Messages.HELP_TEXT, {
                 parse_mode: 'Markdown',
-                ...Keyboards.getHelpKeyboard()
+                reply_markup: Keyboards.getHelpKeyboard().reply_markup,
+                messageType: 'help'
             });
         });
 
@@ -334,17 +383,17 @@ class CommandHandler {
             const transaction = await this.bot.transactionService.getTransaction(transactionId);
             
             if (!transaction) {
-                await ctx.reply('❌ Transazione non trovata.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Transazione non trovata.');
                 return;
             }
             
             if (transaction.sellerId !== userId && transaction.buyerId !== userId) {
-                await ctx.reply('❌ Non autorizzato.');
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Non autorizzato.');
                 return;
             }
             
             ctx.session.transactionId = transactionId;
-            await ctx.scene.enter('transactionScene');
+            await this.bot.chatCleaner.enterScene(ctx, 'transactionScene');
         });
     }
 }
