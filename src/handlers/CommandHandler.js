@@ -7,7 +7,7 @@ class CommandHandler {
     }
 
     setupCommands() {
-        // Start command
+        // Start command - FIX: Mostra sempre la tastiera persistente
         this.bot.bot.start(async (ctx) => {
             const userId = ctx.from.id;
             
@@ -18,8 +18,25 @@ class CommandHandler {
                 return await this.bot.chatCleaner.enterScene(ctx, 'contactSellerScene');
             }
             
-            // Pulisci la chat e mostra il menu
-            await this.bot.chatCleaner.resetUserChat(ctx);
+            // Pulisci eventuali messaggi precedenti
+            await this.bot.chatCleaner.cleanupUserMessages(ctx, ['temporary', 'navigation']);
+            
+            // Mostra welcome message con tastiera persistente
+            await ctx.reply(Messages.WELCOME, {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.MAIN_MENU.reply_markup
+            });
+        });
+
+        // Menu command - Per ripristinare la tastiera se scompare
+        this.bot.bot.command('menu', async (ctx) => {
+            await ctx.reply(
+                '🏠 **Menu Principale**\n\nSeleziona un\'opzione:',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: Keyboards.MAIN_MENU.reply_markup
+                }
+            );
         });
 
         // Help command
@@ -115,9 +132,9 @@ class CommandHandler {
                     3000
                 );
                 
-                // Torna al menu dopo 3 secondi
+                // Torna al menu dopo 3 secondi CON tastiera persistente
                 setTimeout(async () => {
-                    await this.bot.chatCleaner.resetUserChat(ctx);
+                    await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
                 }, 3000);
                 return;
             }
@@ -186,7 +203,7 @@ class CommandHandler {
             }
         });
 
-        // Menu button handlers con pulizia
+        // Menu button handlers con pulizia E tastiera persistente
         this.bot.bot.hears('🔋 Vendi KWH', async (ctx) => {
             await this.bot.chatCleaner.enterScene(ctx, 'sellAnnouncementScene');
         });
@@ -203,7 +220,7 @@ class CommandHandler {
                 );
                 
                 setTimeout(async () => {
-                    await this.bot.chatCleaner.resetUserChat(ctx);
+                    await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
                 }, 3000);
                 return;
             }
@@ -236,7 +253,7 @@ class CommandHandler {
                 );
                 
                 setTimeout(async () => {
-                    await this.bot.chatCleaner.resetUserChat(ctx);
+                    await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
                 }, 3000);
                 return;
             }
@@ -296,7 +313,7 @@ class CommandHandler {
                 );
                 
                 setTimeout(async () => {
-                    await this.bot.chatCleaner.resetUserChat(ctx);
+                    await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
                 }, 3000);
                 return;
             }
