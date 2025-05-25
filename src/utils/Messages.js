@@ -1,4 +1,5 @@
 class Messages {
+    // FIX: Aggiunto il messaggio WELCOME mancante
     static get WELCOME() {
         return `👋 *Benvenuto nel Bot KWH Sharing!*
 
@@ -9,11 +10,10 @@ class Messages {
 • Lasciare e ricevere feedback
 
 Per utilizzare il bot devi essere membro del gruppo autorizzato.
-Verifico la tua membership...
 
 ✅ *Verificato!* Sei abilitato ad usare il bot.
 
-Seleziona un'opzione dal menu qui sotto:`;
+Usa i pulsanti qui sotto per navigare:`;
     }
 
     static get NOT_GROUP_MEMBER() {
