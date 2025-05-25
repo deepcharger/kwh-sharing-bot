@@ -26,6 +26,7 @@ const { createTransactionScene } = require('./scenes/TransactionScene');
 const Keyboards = require('./utils/Keyboards');
 const Messages = require('./utils/Messages');
 const { TransactionCache } = require('./utils/TransactionCache');
+const ChatCleaner = require('./utils/ChatCleaner'); // NUOVO
 
 class KwhBot {
     constructor() {
@@ -53,6 +54,9 @@ class KwhBot {
         // Cache per ID transazioni
         this.transactionCache = new TransactionCache();
         
+        // NUOVO: Chat cleaner per mantenere chat pulite
+        this.chatCleaner = null;
+        
         this.init();
     }
 
@@ -66,6 +70,9 @@ class KwhBot {
             // Initialize services
             await this.initializeServices();
             
+            // NUOVO: Initialize chat cleaner
+            this.chatCleaner = new ChatCleaner(this);
+            
             // Initialize handlers
             await this.initializeHandlers();
             
@@ -74,6 +81,9 @@ class KwhBot {
             
             // Setup webhook and server
             await this.setupWebhook();
+            
+            // NUOVO: Setup cleanup jobs
+            this.setupCleanupJobs();
             
             console.log('✅ Bot KWH Sharing inizializzato con successo!');
             
@@ -216,6 +226,23 @@ class KwhBot {
 
     async setupWebhook() {
         await this.webhookHandler.setupWebhook();
+    }
+
+    // NUOVO: Setup cleanup jobs
+    setupCleanupJobs() {
+        // Pulizia messaggi vecchi ogni ora
+        cron.schedule('0 * * * *', () => {
+            this.chatCleaner.cleanupOldMessages();
+            console.log('🧹 Pulizia messaggi vecchi completata');
+        });
+
+        // Pulizia profonda ogni giorno alle 3:00
+        cron.schedule('0 3 * * *', () => {
+            this.chatCleaner.deepCleanup();
+            console.log('🧹 Pulizia profonda completata');
+        });
+
+        console.log('✅ Chat cleanup jobs configurati');
     }
 
     async stop(signal) {
