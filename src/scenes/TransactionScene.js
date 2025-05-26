@@ -36,6 +36,26 @@ function createTransactionScene(bot) {
             isBuyer
         };
 
+        // Se arriviamo dalla conferma di ricarica
+        if (ctx.session.chargingConfirmed) {
+            await bot.transactionService.updateTransactionStatus(
+                transactionId,
+                'charging_in_progress'
+            );
+            
+            await ctx.reply(
+                '✅ **RICARICA IN CORSO!**\n\n' +
+                'Quando hai terminato la ricarica, premi il pulsante qui sotto.',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: Keyboards.getChargingCompletedKeyboard().reply_markup
+                }
+            );
+            
+            delete ctx.session.chargingConfirmed;
+            return;
+        }
+
         await this.showTransactionStatus(ctx);
     });
 
@@ -47,9 +67,14 @@ function createTransactionScene(bot) {
         message += `📊 Stato: ${bot.getStatusText(transaction.status)}\n`;
         message += `📅 Data: ${transaction.createdAt.toLocaleDateString('it-IT')}\n`;
 
-        if (transaction.kwhAmount) {
-            message += `⚡ KWH: ${transaction.kwhAmount}\n`;
-            message += `💰 Totale: €${transaction.totalAmount?.toFixed(2) || '0.00'}\n`;
+        if (transaction.kwhAmount || transaction.declaredKwh) {
+            const kwh = transaction.kwhAmount || transaction.declaredKwh;
+            message += `⚡ KWH: ${kwh}\n`;
+            if (announcement) {
+                const price = announcement.price || announcement.basePrice;
+                const amount = (kwh * price).toFixed(2);
+                message += `💰 Totale: €${amount}\n`;
+            }
         }
 
         message += `\n📍 Luogo: ${transaction.location}\n`;
@@ -200,6 +225,48 @@ function createTransactionScene(bot) {
         return ctx.scene.leave();
     });
 
+    scene.action('tx_charging_confirmed', async (ctx) => {
+        await ctx.answerCbQuery();
+        const { transaction } = ctx.session.transactionData;
+        
+        await bot.transactionService.updateTransactionStatus(
+            transaction.transactionId,
+            'charging_in_progress'
+        );
+        
+        await ctx.editMessageText(
+            '✅ **RICARICA IN CORSO!**\n\n' +
+            'Quando hai terminato la ricarica, premi il pulsante qui sotto.',
+            {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.getChargingCompletedKeyboard().reply_markup
+            }
+        );
+    });
+
+    scene.action('tx_charging_failed', async (ctx) => {
+        await ctx.answerCbQuery();
+        const { transaction } = ctx.session.transactionData;
+        
+        const retryCount = await bot.transactionService.incrementRetryCount(transaction.transactionId);
+        
+        try {
+            await ctx.telegram.sendMessage(
+                transaction.sellerId,
+                `❌ **PROBLEMA RICARICA**\n\nL'acquirente segnala che la ricarica non è partita. Riprova o verifica il problema.`,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: Keyboards.getRetryActivationKeyboard(retryCount).reply_markup
+                }
+            );
+        } catch (error) {
+            console.error('Error notifying seller:', error);
+        }
+        
+        await ctx.editMessageText('❌ Segnalazione inviata al venditore.');
+        return ctx.scene.leave();
+    });
+
     scene.action('tx_charging_finished', async (ctx) => {
         await ctx.answerCbQuery();
         await ctx.editMessageText(
@@ -232,11 +299,14 @@ function createTransactionScene(bot) {
         const updatedTx = await bot.transactionService.getTransaction(transaction.transactionId);
 
         try {
+            const price = announcement?.price || announcement?.basePrice || 0;
+            const amount = (updatedTx.declaredKwh * price).toFixed(2);
+            
             await ctx.telegram.sendMessage(
                 transaction.buyerId,
                 `✅ **KWH CONFERMATI**\n\n` +
                 `Il venditore ha confermato ${updatedTx.declaredKwh} KWH.\n` +
-                `💰 Totale da pagare: €${updatedTx.totalAmount?.toFixed(2) || '0.00'}\n\n` +
+                `💰 Totale da pagare: €${amount}\n\n` +
                 `Procedi con il pagamento come concordato.`,
                 {
                     parse_mode: 'Markdown',
@@ -252,6 +322,53 @@ function createTransactionScene(bot) {
         }
 
         await ctx.editMessageText('✅ KWH confermati! L\'acquirente procederà con il pagamento.');
+        return ctx.scene.leave();
+    });
+
+    scene.action('tx_kwh_bad', async (ctx) => {
+        await ctx.answerCbQuery();
+        await ctx.editMessageText(
+            '📝 **KWH non corretti**\n\n' +
+            'Specifica il problema:\n' +
+            '• Quanti KWH mostra realmente la foto?\n' +
+            '• Qual è il problema riscontrato?',
+            { parse_mode: 'Markdown' }
+        );
+        ctx.session.waitingFor = 'kwh_dispute';
+    });
+
+    scene.action('tx_payment_done', async (ctx) => {
+        await ctx.answerCbQuery();
+        const { transaction } = ctx.session.transactionData;
+        
+        await bot.transactionService.updateTransactionStatus(
+            transaction.transactionId,
+            'payment_declared'
+        );
+
+        try {
+            await ctx.telegram.sendMessage(
+                transaction.sellerId,
+                `💳 **PAGAMENTO DICHIARATO**\n\n` +
+                `L'acquirente dichiara di aver effettuato il pagamento.\n` +
+                `Conferma la ricezione del pagamento.`,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '✅ Ricevuto', callback_data: `payment_ok_${transaction.transactionId}` },
+                                { text: '❌ Non ricevuto', callback_data: `payment_fail_${transaction.transactionId}` }
+                            ]
+                        ]
+                    }
+                }
+            );
+        } catch (error) {
+            console.error('Error notifying seller:', error);
+        }
+
+        await ctx.editMessageText('✅ Dichiarazione pagamento inviata al venditore.');
         return ctx.scene.leave();
     });
 
@@ -299,6 +416,49 @@ function createTransactionScene(bot) {
     scene.action('tx_back', async (ctx) => {
         await ctx.answerCbQuery();
         return ctx.scene.leave();
+    });
+
+    scene.action('tx_leave_feedback', async (ctx) => {
+        await ctx.answerCbQuery();
+        const { transaction } = ctx.session.transactionData;
+        
+        ctx.session.completedTransactionId = transaction.transactionId;
+        
+        await ctx.editMessageText(
+            Messages.FEEDBACK_REQUEST,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
+            }
+        );
+        
+        return ctx.scene.leave();
+    });
+
+    // Callback per ricarica attivata dall'esterno
+    scene.action(/^charging_ok_(.+)$/, async (ctx) => {
+        await ctx.answerCbQuery();
+        const transactionId = ctx.match[1];
+        
+        if (transactionId !== ctx.session.transactionData?.transaction?.transactionId) {
+            ctx.session.transactionId = transactionId;
+            ctx.session.chargingConfirmed = true;
+            return ctx.scene.reenter();
+        }
+        
+        await bot.transactionService.updateTransactionStatus(
+            transactionId,
+            'charging_in_progress'
+        );
+        
+        await ctx.editMessageText(
+            '✅ **RICARICA IN CORSO!**\n\n' +
+            'Quando hai terminato la ricarica, premi il pulsante qui sotto.',
+            {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.getChargingCompletedKeyboard().reply_markup
+            }
+        );
     });
 
     // Gestione input testo
@@ -355,8 +515,8 @@ function createTransactionScene(bot) {
                         reply_markup: {
                             inline_keyboard: [
                                 [
-                                    { text: '✅ Corretti', callback_data: `kwh_ok_${transaction.transactionId}` },
-                                    { text: '❌ Non corretti', callback_data: `kwh_bad_${transaction.transactionId}` }
+                                    { text: '✅ Corretti', callback_data: `kwh_ok_${bot.transactionCache.TransactionCache.generateShortId(transaction.transactionId)}` },
+                                    { text: '❌ Non corretti', callback_data: `kwh_bad_${bot.transactionCache.TransactionCache.generateShortId(transaction.transactionId)}` }
                                 ]
                             ]
                         }
@@ -374,6 +534,31 @@ function createTransactionScene(bot) {
             await ctx.reply('✅ Dati inviati al venditore per verifica.');
             return ctx.scene.leave();
         }
+
+        if (ctx.session.waitingFor === 'kwh_dispute') {
+            const { transaction } = ctx.session.transactionData;
+            
+            await bot.transactionService.addTransactionIssue(
+                transaction.transactionId,
+                `Discrepanza KWH: ${text}`,
+                ctx.from.id
+            );
+
+            try {
+                await ctx.telegram.sendMessage(
+                    transaction.buyerId,
+                    `⚠️ **Problema con i KWH dichiarati**\n\n` +
+                    `Il venditore segnala: ${text}\n\n` +
+                    `Controlla nuovamente la foto e rispondi al venditore.`,
+                    { parse_mode: 'Markdown' }
+                );
+            } catch (error) {
+                console.error('Error notifying buyer:', error);
+            }
+
+            await ctx.reply('⚠️ Problema segnalato all\'acquirente.');
+            return ctx.scene.leave();
+        }
     });
 
     // Gestione foto
@@ -389,6 +574,101 @@ function createTransactionScene(bot) {
                 { parse_mode: 'Markdown' }
             );
         }
+    });
+
+    // Callback per pagamento dall'esterno
+    scene.action(/^payment_done_(.+)$/, async (ctx) => {
+        await ctx.answerCbQuery();
+        const transactionId = ctx.match[1];
+        
+        await bot.transactionService.updateTransactionStatus(
+            transactionId,
+            'payment_declared'
+        );
+
+        const transaction = await bot.transactionService.getTransaction(transactionId);
+
+        try {
+            await ctx.telegram.sendMessage(
+                transaction.sellerId,
+                `💳 **PAGAMENTO DICHIARATO**\n\n` +
+                `L'acquirente @${ctx.from.username || ctx.from.first_name} dichiara di aver pagato.\n\n` +
+                `ID Transazione: \`${transactionId}\`\n\n` +
+                `Hai ricevuto il pagamento?`,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: Keyboards.getSellerPaymentConfirmKeyboard().reply_markup
+                }
+            );
+        } catch (error) {
+            console.error('Error notifying seller:', error);
+        }
+
+        await ctx.editMessageText('✅ Dichiarazione pagamento inviata al venditore.');
+    });
+
+    // Callback per conferma pagamento dall'esterno
+    scene.action(/^payment_ok_(.+)$/, async (ctx) => {
+        await ctx.answerCbQuery();
+        const transactionId = ctx.match[1];
+        
+        await bot.transactionService.updateTransactionStatus(
+            transactionId,
+            'completed'
+        );
+
+        const transaction = await bot.transactionService.getTransaction(transactionId);
+
+        await bot.userService.updateUserTransactionStats(
+            transaction.sellerId,
+            transaction.actualKwh || transaction.declaredKwh,
+            'sell'
+        );
+        await bot.userService.updateUserTransactionStats(
+            transaction.buyerId,
+            transaction.actualKwh || transaction.declaredKwh,
+            'buy'
+        );
+
+        try {
+            await ctx.telegram.sendMessage(
+                transaction.buyerId,
+                Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST +
+                `\n\n🔍 ID Transazione: \`${transactionId}\``,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
+                }
+            );
+        } catch (error) {
+            console.error('Error notifying buyer:', error);
+        }
+
+        await ctx.editMessageText(
+            Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
+            }
+        );
+        
+        ctx.session.completedTransactionId = transactionId;
+    });
+
+    // Callback per feedback dall'esterno
+    scene.action(/^feedback_tx_(.+)$/, async (ctx) => {
+        await ctx.answerCbQuery();
+        const transactionId = ctx.match[1];
+        
+        ctx.session.completedTransactionId = transactionId;
+        
+        await ctx.editMessageText(
+            Messages.FEEDBACK_REQUEST,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
+            }
+        );
     });
 
     return scene;
