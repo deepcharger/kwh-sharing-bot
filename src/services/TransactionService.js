@@ -10,7 +10,8 @@ class TransactionService {
             const announcement = await this.db.getCollection('announcements')
                 .findOne({ announcementId: announcementId });
                 
-            if (!announcement || !announcement.isActive) {
+            // FIX: Cambiato da isActive a active
+            if (!announcement || !announcement.active) {
                 throw new Error('Annuncio non disponibile');
             }
 
