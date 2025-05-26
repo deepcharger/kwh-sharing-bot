@@ -1,548 +1,340 @@
-const { Scenes } = require('telegraf');
-const Messages = require('../utils/Messages');
-const Keyboards = require('../utils/Keyboards');
+class AnnouncementService {
+    constructor(db) {
+        this.db = db;
+        this.collection = db.getCollection('announcements');
+    }
 
-function createSellAnnouncementScene(bot) {
-    const scene = new Scenes.BaseScene('sellAnnouncementScene');
+    async createAnnouncement(data) {
+        try {
+            const announcement = {
+                announcementId: `A${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                userId: data.userId,
+                location: data.location,
+                price: data.price,
+                currentType: data.currentType,
+                zones: data.zones,
+                networks: data.networks,
+                paymentMethods: data.paymentMethods,
+                active: true,
+                messageId: null,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                
+                // Nuovi campi per sistema prezzi
+                description: data.description || '',
+                availability: data.availability || 'Sempre disponibile',
+                contactInfo: data.contactInfo || '',
+                pricingType: data.pricingType || 'fixed',
+                basePrice: data.basePrice || data.price,
+                pricingTiers: data.pricingTiers || null,
+                minimumKwh: data.minimumKwh || null
+            };
 
-    scene.enter(async (ctx) => {
-        ctx.session.announcementData = {};
-        
-        await ctx.reply(
-            Messages.SELL_WELCOME,
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '📝 Crea Annuncio', callback_data: 'start_announcement' }],
-                        [{ text: '❌ Annulla', callback_data: 'cancel' }]
-                    ]
+            const result = await this.collection.insertOne(announcement);
+            return announcement;
+        } catch (error) {
+            console.error('Error creating announcement:', error);
+            throw error;
+        }
+    }
+
+    async getAnnouncement(announcementId) {
+        try {
+            return await this.collection.findOne({ 
+                announcementId: announcementId 
+            });
+        } catch (error) {
+            console.error('Error getting announcement:', error);
+            throw error;
+        }
+    }
+
+    async getActiveAnnouncements(limit = 20) {
+        try {
+            return await this.collection
+                .find({ active: true })
+                .sort({ createdAt: -1 })
+                .limit(limit)
+                .toArray();
+        } catch (error) {
+            console.error('Error getting active announcements:', error);
+            throw error;
+        }
+    }
+
+    async getUserAnnouncements(userId) {
+        try {
+            return await this.collection
+                .find({ 
+                    userId: userId,
+                    active: true 
+                })
+                .sort({ createdAt: -1 })
+                .toArray();
+        } catch (error) {
+            console.error('Error getting user announcements:', error);
+            throw error;
+        }
+    }
+
+    async deleteAnnouncement(announcementId, userId) {
+        try {
+            const result = await this.collection.updateOne(
+                { 
+                    announcementId: announcementId, 
+                    userId: userId 
+                },
+                { 
+                    $set: { 
+                        active: false,
+                        updatedAt: new Date()
+                    } 
                 }
-            }
-        );
-    });
+            );
+            return result.modifiedCount > 0;
+        } catch (error) {
+            console.error('Error deleting announcement:', error);
+            throw error;
+        }
+    }
 
-    scene.action('start_announcement', async (ctx) => {
-        await ctx.answerCbQuery();
-        await ctx.editMessageText(
-            '💰 **TIPO DI PREZZO**\n\nCome vuoi impostare il prezzo?',
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '💵 Prezzo fisso', callback_data: 'price_fixed' }],
-                        [{ text: '📊 Prezzi graduati', callback_data: 'price_graduated' }],
-                        [{ text: '❌ Annulla', callback_data: 'cancel' }]
-                    ]
+    async updateAnnouncement(announcementId, updateData) {
+        try {
+            const result = await this.collection.updateOne(
+                { announcementId: announcementId },
+                { 
+                    $set: {
+                        ...updateData,
+                        updatedAt: new Date()
+                    }
                 }
-            }
-        );
-    });
-
-    scene.action('price_fixed', async (ctx) => {
-        await ctx.answerCbQuery();
-        ctx.session.announcementData = {
-            pricingType: 'fixed'
-        };
-        await ctx.editMessageText(
-            '💵 **PREZZO FISSO**\n\nQuale prezzo vuoi impostare per KWH?\n\nInserisci un valore (es: 0.35):',
-            { parse_mode: 'Markdown' }
-        );
-        ctx.session.step = 'price';
-    });
-
-    scene.action('price_graduated', async (ctx) => {
-        await ctx.answerCbQuery();
-        ctx.session.announcementData = {
-            pricingType: 'graduated',
-            pricingTiers: []
-        };
-        await ctx.editMessageText(
-            Messages.formatGraduatedPricingExplanation() + '\n\n' +
-            'Iniziamo con la prima fascia.\nInserisci: `limite_kwh prezzo`\n\nEsempio: `30 0.45`',
-            { parse_mode: 'Markdown' }
-        );
-        ctx.session.step = 'graduated_tier';
-    });
-
-    scene.on('text', async (ctx) => {
-        const text = ctx.message.text.trim();
-        const step = ctx.session.step;
-
-        switch (step) {
-            case 'price':
-                await handleFixedPrice(ctx, text);
-                break;
-            case 'graduated_tier':
-                await handleGraduatedTier(ctx, text);
-                break;
-            case 'minimum_kwh':
-                await handleMinimumKwh(ctx, text);
-                break;
-            case 'current_type':
-                await handleCurrentType(ctx, text);
-                break;
-            case 'zones':
-                await handleZones(ctx, text);
-                break;
-            case 'networks':
-                await handleNetworks(ctx, text);
-                break;
-            case 'payment_methods':
-                await handlePaymentMethods(ctx, text);
-                break;
-            case 'description':
-                await handleDescription(ctx, text);
-                break;
-            case 'availability':
-                await handleAvailability(ctx, text);
-                break;
+            );
+            return result.modifiedCount > 0;
+        } catch (error) {
+            console.error('Error updating announcement:', error);
+            throw error;
         }
-    });
+    }
 
-    async function handleFixedPrice(ctx, price) {
-        const priceNum = parseFloat(price.replace(',', '.'));
-        
-        if (isNaN(priceNum) || priceNum <= 0 || priceNum > 10) {
-            await ctx.reply('❌ Inserisci un prezzo valido tra 0.01 e 10.00 €/KWH');
-            return;
-        }
-
-        ctx.session.announcementData.basePrice = priceNum;
-        ctx.session.announcementData.price = priceNum; // Compatibilità
-        
-        await ctx.reply(
-            '🎯 **MINIMO GARANTITO** (opzionale)\n\n' +
-            'Vuoi impostare un minimo di KWH da far pagare sempre?\n\n' +
-            'Esempio: se imposti 10, chi ricarica 5 KWH paga comunque per 10 KWH',
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '✅ Sì, imposta minimo', callback_data: 'set_minimum' }],
-                        [{ text: '❌ No, continua', callback_data: 'skip_minimum' }],
-                        [{ text: '🔙 Annulla', callback_data: 'cancel' }]
-                    ]
+    async getAnnouncementStats() {
+        try {
+            const stats = await this.collection.aggregate([
+                { $match: { active: true } },
+                {
+                    $group: {
+                        _id: null,
+                        totalActive: { $sum: 1 },
+                        avgPrice: { 
+                            $avg: {
+                                $cond: [
+                                    { $eq: ['$pricingType', 'fixed'] },
+                                    '$basePrice',
+                                    { $arrayElemAt: ['$pricingTiers.price', 0] }
+                                ]
+                            }
+                        },
+                        minPrice: { 
+                            $min: {
+                                $cond: [
+                                    { $eq: ['$pricingType', 'fixed'] },
+                                    '$basePrice',
+                                    { $arrayElemAt: ['$pricingTiers.price', 0] }
+                                ]
+                            }
+                        },
+                        maxPrice: { 
+                            $max: {
+                                $cond: [
+                                    { $eq: ['$pricingType', 'fixed'] },
+                                    '$basePrice',
+                                    { $arrayElemAt: ['$pricingTiers.price', -1] }
+                                ]
+                            }
+                        }
+                    }
                 }
-            }
-        );
+            ]).toArray();
+
+            return stats[0] || {
+                totalActive: 0,
+                avgPrice: 0,
+                minPrice: 0,
+                maxPrice: 0
+            };
+        } catch (error) {
+            console.error('Error getting announcement stats:', error);
+            throw error;
+        }
     }
 
-    async function handleGraduatedTier(ctx, input) {
-        if (input.toLowerCase() === 'fine') {
-            return finishGraduatedTiers(ctx);
-        }
-
-        const parts = input.split(/\s+/);
-        if (parts.length !== 2) {
-            await ctx.reply('❌ Formato non valido. Usa: `limite_kwh prezzo`\n\nEsempio: `30 0.45`', 
-                { parse_mode: 'Markdown' });
-            return;
-        }
-
-        const limit = parseInt(parts[0]);
-        const price = parseFloat(parts[1].replace(',', '.'));
-
-        if (isNaN(limit) || limit <= 0 || limit > 10000) {
-            await ctx.reply('❌ Limite KWH non valido (1-10000). Riprova:');
-            return;
-        }
-
-        if (isNaN(price) || price <= 0 || price > 10) {
-            await ctx.reply('❌ Prezzo non valido (0.01-10.00 €/KWH). Riprova:');
-            return;
-        }
-
-        const tiers = ctx.session.announcementData.pricingTiers;
-        if (tiers.length > 0 && limit <= tiers[tiers.length - 1].limit) {
-            await ctx.reply(`❌ Il limite deve essere maggiore di ${tiers[tiers.length - 1].limit}. Riprova:`);
-            return;
-        }
-
-        tiers.push({ limit, price });
-
-        let message = `✅ Fascia ${tiers.length} aggiunta!\n\n📊 **Fasce configurate:**\n`;
-        for (let i = 0; i < tiers.length; i++) {
-            const prevLimit = i > 0 ? tiers[i-1].limit : 0;
-            message += `• ${prevLimit + 1}-${tiers[i].limit} KWH: TUTTO a ${tiers[i].price}€/KWH\n`;
-        }
-
-        message += '\nAggiungi altra fascia o scrivi `fine` per terminare:';
-
-        await ctx.reply(message, { 
-            parse_mode: 'Markdown',
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: '✅ Termina configurazione', callback_data: 'finish_tiers' }],
-                    [{ text: '❌ Annulla', callback_data: 'cancel' }]
-                ]
-            }
-        });
-    }
-
-    scene.action('finish_tiers', async (ctx) => {
-        await ctx.answerCbQuery();
-        await finishGraduatedTiers(ctx);
-    });
-
-    async function finishGraduatedTiers(ctx) {
-        const tiers = ctx.session.announcementData.pricingTiers;
+    // Metodo per formattare annuncio con posizione copiabile (per chat privata)
+    async formatAnnouncementMessage(announcement, userStats) {
+        let message = `🔋 **OFFERTA ENERGIA**\n\n`;
         
-        if (tiers.length === 0) {
-            await ctx.reply('❌ Devi configurare almeno una fascia!');
-            return;
+        if (announcement.userId) {
+            const username = announcement.userId.username || announcement.userId.firstName || 'Utente';
+            message += `👤 **Venditore:** @${username}\n`;
         }
-
-        // Aggiungi fascia finale automatica
-        const lastTier = tiers[tiers.length - 1];
-        tiers.push({ 
-            limit: null, 
-            price: Math.max(0.01, lastTier.price - 0.05) 
-        });
-
-        await ctx.reply(
-            '🎯 **MINIMO GARANTITO** (opzionale)\n\n' +
-            'Vuoi impostare un minimo di KWH?',
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '✅ Sì, imposta minimo', callback_data: 'set_minimum' }],
-                        [{ text: '❌ No, continua', callback_data: 'skip_minimum' }],
-                        [{ text: '🔙 Annulla', callback_data: 'cancel' }]
-                    ]
-                }
-            }
-        );
-    }
-
-    scene.action('set_minimum', async (ctx) => {
-        await ctx.answerCbQuery();
-        await ctx.editMessageText(
-            '🎯 Inserisci il numero minimo di KWH (es: 10):',
-            { parse_mode: 'Markdown' }
-        );
-        ctx.session.step = 'minimum_kwh';
-    });
-
-    scene.action('skip_minimum', async (ctx) => {
-        await ctx.answerCbQuery();
-        ctx.session.announcementData.minimumKwh = null;
-        await askCurrentType(ctx);
-    });
-
-    async function handleMinimumKwh(ctx, input) {
-        const minimum = parseInt(input);
         
-        if (isNaN(minimum) || minimum <= 0 || minimum > 1000) {
-            await ctx.reply('❌ Inserisci un valore valido tra 1 e 1000 KWH');
-            return;
+        // Badge venditore
+        if (userStats && userStats.totalFeedback >= 5) {
+            if (userStats.positivePercentage >= 95) {
+                message += `🌟 **VENDITORE TOP** (${userStats.positivePercentage}% positivi)\n`;
+            } else if (userStats.positivePercentage >= 90) {
+                message += `✅ **VENDITORE AFFIDABILE** (${userStats.positivePercentage}% positivi)\n`;
+            }
         }
-
-        ctx.session.announcementData.minimumKwh = minimum;
-        await askCurrentType(ctx);
-    }
-
-    async function askCurrentType(ctx) {
-        await ctx.reply(
-            '⚡ **TIPO DI CORRENTE**\n\nChe tipo di corrente offri?',
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '🔌 Solo DC', callback_data: 'current_dc_only' }],
-                        [{ text: '⚡ Solo AC', callback_data: 'current_ac_only' }],
-                        [{ text: '🔋 Entrambi DC e AC', callback_data: 'current_both' }],
-                        [{ text: '❌ Annulla', callback_data: 'cancel' }]
-                    ]
-                }
-            }
-        );
-    }
-
-    scene.action(/^current_(.+)$/, async (ctx) => {
-        await ctx.answerCbQuery();
-        const currentType = ctx.match[1].replace('_', ' ').toUpperCase();
-        ctx.session.announcementData.currentType = currentType;
         
-        await ctx.editMessageText(
-            '📍 **ZONE SERVITE**\n\n' +
-            'In quali zone offri il servizio?\n\n' +
-            '💡 **Suggerimenti:**\n' +
-            '• "Italia" (tutto il paese)\n' +
-            '• "Lombardia" (intera regione)\n' +
-            '• "Milano e provincia"\n' +
-            '• "Centro Milano, Navigli, Porta Romana"\n\n' +
-            'Inserisci le zone:',
-            { parse_mode: 'Markdown' }
-        );
-        ctx.session.step = 'zones';
-    });
-
-    async function handleZones(ctx, zones) {
-        ctx.session.announcementData.zones = zones;
-        ctx.session.announcementData.location = zones; // Useremo le zone come location generica
+        // Posizione copiabile
+        message += `\n📍 **Posizione:** \`${announcement.location}\`\n`;
         
-        await ctx.reply(
-            '🌐 **RETI DI RICARICA**\n\nQuale rete di ricarica usi?',
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '🌐 Tutte le reti', callback_data: 'networks_all' }],
-                        [{ text: '📝 Specifica reti', callback_data: 'networks_specific' }],
-                        [{ text: '❌ Annulla', callback_data: 'cancel' }]
-                    ]
-                }
-            }
-        );
-    }
-
-    scene.action('networks_all', async (ctx) => {
-        await ctx.answerCbQuery();
-        ctx.session.announcementData.networks = 'Tutte le reti';
-        await askDescription(ctx);
-    });
-
-    scene.action('networks_specific', async (ctx) => {
-        await ctx.answerCbQuery();
-        await ctx.editMessageText(
-            '🌐 Inserisci le reti disponibili separate da virgola\n\n' +
-            'Esempio: Enel X, Be Charge, Ionity',
-            { parse_mode: 'Markdown' }
-        );
-        ctx.session.step = 'networks';
-    });
-
-    async function handleNetworks(ctx, networks) {
-        ctx.session.announcementData.networks = networks;
-        await askDescription(ctx);
-    }
-
-    async function askDescription(ctx) {
-        await ctx.reply(
-            '📝 **DESCRIZIONE** (opzionale)\n\n' +
-            'Vuoi aggiungere una descrizione?\n' +
-            'Puoi specificare dettagli come orari preferiti, tipo di colonnine disponibili, ecc.',
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '✅ Sì, aggiungi', callback_data: 'add_description' }],
-                        [{ text: '❌ No, continua', callback_data: 'skip_description' }],
-                        [{ text: '🔙 Annulla', callback_data: 'cancel' }]
-                    ]
-                }
-            }
-        );
-    }
-
-    scene.action('add_description', async (ctx) => {
-        await ctx.answerCbQuery();
-        await ctx.editMessageText(
-            '📝 Inserisci una breve descrizione (es: Disponibile per ricariche veloci, accesso 24/7):',
-            { parse_mode: 'Markdown' }
-        );
-        ctx.session.step = 'description';
-    });
-
-    scene.action('skip_description', async (ctx) => {
-        await ctx.answerCbQuery();
-        ctx.session.announcementData.description = '';
-        await askAvailability(ctx);
-    });
-
-    async function handleDescription(ctx, description) {
-        if (description.length > 500) {
-            await ctx.reply('❌ La descrizione deve essere massimo 500 caratteri. Riprova:');
-            return;
+        if (announcement.description) {
+            message += `📝 **Descrizione:** ${announcement.description}\n`;
         }
-        ctx.session.announcementData.description = description;
-        await askAvailability(ctx);
-    }
-
-    async function askAvailability(ctx) {
-        await ctx.reply(
-            '⏰ **DISPONIBILITÀ**\n\nQuando sei disponibile per attivare le ricariche?',
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '🕐 Sempre disponibile', callback_data: 'availability_always' }],
-                        [{ text: '⏰ Specifica orari', callback_data: 'availability_custom' }],
-                        [{ text: '❌ Annulla', callback_data: 'cancel' }]
-                    ]
-                }
-            }
-        );
-    }
-
-    scene.action('availability_always', async (ctx) => {
-        await ctx.answerCbQuery();
-        ctx.session.announcementData.availability = 'Sempre disponibile';
-        await askPaymentMethods(ctx);
-    });
-
-    scene.action('availability_custom', async (ctx) => {
-        await ctx.answerCbQuery();
-        await ctx.editMessageText(
-            '⏰ Inserisci gli orari di disponibilità (es: Lun-Ven 8:00-18:00):',
-            { parse_mode: 'Markdown' }
-        );
-        ctx.session.step = 'availability';
-    });
-
-    async function handleAvailability(ctx, availability) {
-        if (availability.length > 200) {
-            await ctx.reply('❌ La disponibilità deve essere massimo 200 caratteri. Riprova:');
-            return;
-        }
-        ctx.session.announcementData.availability = availability;
-        await askPaymentMethods(ctx);
-    }
-
-    async function askPaymentMethods(ctx) {
-        await ctx.reply(
-            '💳 **METODI DI PAGAMENTO**\n\n' +
-            'Quali metodi di pagamento accetti?\n\n' +
-            'Esempio: PayPal, Satispay, Bonifico',
-            { parse_mode: 'Markdown' }
-        );
-        ctx.session.step = 'payment_methods';
-    }
-
-    async function handlePaymentMethods(ctx, methods) {
-        ctx.session.announcementData.paymentMethods = methods;
-        await showPreview(ctx);
-    }
-
-    async function showPreview(ctx) {
-        const data = ctx.session.announcementData;
         
-        let preview = '📋 **ANTEPRIMA ANNUNCIO**\n\n';
+        if (announcement.availability) {
+            message += `⏰ **Disponibilità:** ${announcement.availability}\n`;
+        }
         
         // Pricing
-        if (data.pricingType === 'fixed') {
-            preview += `💰 Prezzo: ${data.basePrice}€/KWH\n`;
-        } else {
-            preview += '💰 Prezzi graduati:\n';
-            for (let i = 0; i < data.pricingTiers.length; i++) {
-                const tier = data.pricingTiers[i];
-                const prevLimit = i > 0 ? data.pricingTiers[i-1].limit : 0;
-                if (tier.limit) {
-                    preview += `  • ${prevLimit + 1}-${tier.limit} KWH: ${tier.price}€/KWH\n`;
-                } else {
-                    preview += `  • Oltre ${prevLimit} KWH: ${tier.price}€/KWH\n`;
-                }
-            }
+        message += `\n${this.formatPricing(announcement)}\n`;
+        
+        if (announcement.currentType) {
+            message += `\n⚡ **Tipo corrente:** ${announcement.currentType}\n`;
         }
         
-        if (data.minimumKwh) {
-            preview += `🎯 Minimo: ${data.minimumKwh} KWH\n`;
+        if (announcement.zones) {
+            message += `📍 **Zone:** ${announcement.zones}\n`;
         }
         
-        preview += `⚡ Corrente: ${data.currentType}\n`;
-        preview += `📍 Zone: ${data.zones}\n`;
-        preview += `🌐 Reti: ${data.networks}\n`;
-        
-        if (data.description) {
-            preview += `📝 Descrizione: ${data.description}\n`;
+        if (announcement.networks) {
+            message += `🌐 **Reti:** ${announcement.networks}\n`;
         }
         
-        preview += `⏰ Disponibilità: ${data.availability}\n`;
-        preview += `💳 Pagamenti: ${data.paymentMethods}\n`;
-
-        await ctx.reply(preview, {
-            parse_mode: 'Markdown',
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: '✅ Pubblica annuncio', callback_data: 'publish_announcement' }],
-                    [{ text: '✏️ Modifica', callback_data: 'edit_announcement' }],
-                    [{ text: '❌ Annulla', callback_data: 'cancel' }]
-                ]
-            }
-        });
+        if (announcement.paymentMethods) {
+            message += `💳 **Pagamenti:** ${announcement.paymentMethods}\n`;
+        }
+        
+        if (announcement.contactInfo) {
+            message += `📞 **Contatti:** ${announcement.contactInfo}\n`;
+        }
+        
+        // ID copiabile
+        message += `\n🆔 **ID:** \`${announcement.announcementId}\``;
+        
+        return message;
     }
 
-    scene.action('publish_announcement', async (ctx) => {
-        await ctx.answerCbQuery();
+    // METODO CHIAVE: Formatta annuncio per pubblicazione nel gruppo con posizione copiabile
+    formatAnnouncementForGroup(announcement, userStats) {
+        let message = `🔋 **Vendita kWh sharing**\n\n`;
         
-        const data = ctx.session.announcementData;
-        data.userId = ctx.from.id;
-        data.contactInfo = ctx.from.username ? `@${ctx.from.username}` : 'Telegram';
-
-        try {
-            const announcement = await bot.announcementService.createAnnouncement(data);
-            
-            // Ottieni stats utente per badge
-            const userStats = await bot.userService.getUserStats(ctx.from.id);
-            
-            // USA IL METODO formatAnnouncementForGroup PER POSIZIONE COPIABILE
-            const groupMessage = bot.announcementService.formatAnnouncementForGroup(
-                announcement, 
-                userStats
-            );
-            
-            // Pubblica nel topic del gruppo
-            const sentMessage = await ctx.telegram.sendMessage(
-                bot.groupId,
-                groupMessage,
-                {
-                    parse_mode: 'Markdown',
-                    message_thread_id: parseInt(bot.topicId),
-                    reply_markup: Keyboards.getContactSellerKeyboard(announcement.announcementId).reply_markup
-                }
-            );
-            
-            // Salva ID messaggio per eventuale eliminazione
-            await bot.announcementService.updateAnnouncement(
-                announcement.announcementId,
-                { messageId: sentMessage.message_id }
-            );
-            
-            await ctx.editMessageText(
-                '✅ **ANNUNCIO PUBBLICATO!**\n\n' +
-                'Il tuo annuncio è ora visibile nel gruppo.\n' +
-                'Riceverai una notifica quando qualcuno sarà interessato.',
-                {
-                    parse_mode: 'Markdown',
-                    reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
-                }
-            );
-            
-        } catch (error) {
-            console.error('Errore pubblicazione:', error);
-            await ctx.editMessageText(
-                '❌ Errore nella pubblicazione. Riprova più tardi.',
-                {
-                    parse_mode: 'Markdown',
-                    reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
-                }
-            );
+        // Venditore con eventuale badge
+        let sellerInfo = `👤 Venditore: @${announcement.userId?.username || announcement.contactInfo || 'utente'}`;
+        
+        if (userStats && userStats.totalFeedback >= 5) {
+            if (userStats.positivePercentage >= 95) {
+                sellerInfo += ` 🌟 TOP`;
+            } else if (userStats.positivePercentage >= 90) {
+                sellerInfo += ` ✅ AFFIDABILE`;
+            }
         }
         
-        return ctx.scene.leave();
-    });
-
-    scene.action('edit_announcement', async (ctx) => {
-        await ctx.answerCbQuery();
-        await ctx.editMessageText(
-            '✏️ Modifica non ancora disponibile. Puoi eliminare e ricreare l\'annuncio.',
-            {
-                parse_mode: 'Markdown',
-                reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup
+        message += sellerInfo + '\n';
+        
+        // IMPORTANTE: Posizione copiabile con backtick
+        message += `📍 Posizione: \`${announcement.location}\`\n`;
+        
+        // Pricing compatto
+        if (announcement.pricingType === 'fixed') {
+            message += `💰 Prezzo: ${announcement.basePrice || announcement.price}€/KWH`;
+            if (announcement.minimumKwh) {
+                message += ` (min ${announcement.minimumKwh} KWH)`;
             }
-        );
-        return ctx.scene.leave();
-    });
+        } else if (announcement.pricingType === 'graduated' && announcement.pricingTiers) {
+            message += `💰 Prezzi: `;
+            const tiers = announcement.pricingTiers;
+            if (tiers.length > 0) {
+                message += `da ${tiers[0].price}€/KWH`;
+                if (tiers.length > 1) {
+                    const lastTier = tiers[tiers.length - 1];
+                    message += ` a ${lastTier.price}€/KWH`;
+                }
+            }
+        } else {
+            message += `💰 Prezzo: ${announcement.price || announcement.basePrice}€/KWH`;
+        }
+        
+        message += '\n';
+        
+        // Tipo corrente
+        if (announcement.currentType) {
+            message += `⚡ Corrente: ${announcement.currentType}\n`;
+        }
+        
+        // Zone (compatte)
+        if (announcement.zones) {
+            message += `📍 Zone: ${announcement.zones}\n`;
+        }
+        
+        // Reti
+        if (announcement.networks) {
+            message += `🌐 Reti: ${announcement.networks}\n`;
+        }
+        
+        // AGGIUNGIAMO LA DESCRIZIONE SE PRESENTE
+        if (announcement.description && announcement.description.trim() !== '') {
+            message += `📝 Descrizione: ${announcement.description}\n`;
+        }
+        
+        // Disponibilità (solo se diversa da sempre)
+        if (announcement.availability && announcement.availability !== 'Sempre disponibile') {
+            message += `⏰ Disponibilità: ${announcement.availability}\n`;
+        }
+        
+        // Pagamenti
+        if (announcement.paymentMethods) {
+            message += `💳 Pagamenti: ${announcement.paymentMethods}\n`;
+        }
+        
+        // ID copiabile
+        message += `\n🆔 ID: \`${announcement.announcementId}\``;
+        
+        return message;
+    }
 
-    scene.action('cancel', async (ctx) => {
-        await ctx.answerCbQuery();
-        await ctx.editMessageText('❌ Creazione annuncio annullata.');
-        return ctx.scene.leave();
-    });
-
-    return scene;
+    formatPricing(announcement) {
+        if (announcement.pricingType === 'fixed') {
+            let text = `💰 **Prezzo:** ${announcement.basePrice || announcement.price}€/KWH`;
+            if (announcement.minimumKwh) {
+                text += `\n🎯 **Minimo garantito:** ${announcement.minimumKwh} KWH`;
+            }
+            return text;
+        }
+        
+        if (announcement.pricingType === 'graduated' && announcement.pricingTiers) {
+            let text = `📊 **Prezzi graduati:**\n`;
+            
+            for (let i = 0; i < announcement.pricingTiers.length; i++) {
+                const tier = announcement.pricingTiers[i];
+                const prevLimit = i > 0 ? announcement.pricingTiers[i-1].limit : 0;
+                
+                if (tier.limit === null) {
+                    text += `• Oltre ${prevLimit} KWH: TUTTO a ${tier.price}€/KWH\n`;
+                } else {
+                    text += `• ${prevLimit + 1}-${tier.limit} KWH: TUTTO a ${tier.price}€/KWH\n`;
+                }
+            }
+            
+            if (announcement.minimumKwh) {
+                text += `🎯 **Minimo garantito:** ${announcement.minimumKwh} KWH`;
+            }
+            
+            return text.trim();
+        }
+        
+        return `💰 **Prezzo:** ${announcement.price || announcement.basePrice || 'Non specificato'}€/KWH`;
+    }
 }
 
-module.exports = { createSellAnnouncementScene };
+module.exports = AnnouncementService;
