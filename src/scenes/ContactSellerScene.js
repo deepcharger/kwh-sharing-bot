@@ -216,7 +216,34 @@ function createContactSellerScene(bot) {
         ctx.session.contactData.currentType = currentType;
         ctx.session.contactData.step = 'location';
         
-        await ctx.editMessageText('📍 **POSIZIONE ESATTA COLONNINA?**\n\nInserisci indirizzo o coordinate GPS.', { parse_mode: 'Markdown' });
+        await ctx.editMessageText(
+            '📍 **POSIZIONE ESATTA COLONNINA?**\n\n' +
+            'Puoi:\n' +
+            '• Scrivere l\'indirizzo\n' +
+            '• Inviare la posizione tramite 📎 Allegato → 📍 Posizione\n' +
+            '• Inserire coordinate GPS',
+            { parse_mode: 'Markdown' }
+        );
+    });
+
+    // Handler per la posizione inviata tramite Telegram
+    scene.on('location', async (ctx) => {
+        const data = ctx.session.contactData;
+        
+        if (!data || data.step !== 'location') {
+            return; // Ignora se non stiamo aspettando una posizione
+        }
+        
+        const location = ctx.message.location;
+        // Salva sia le coordinate che una stringa formattata
+        data.location = `${location.latitude}, ${location.longitude}`;
+        data.locationCoords = {
+            latitude: location.latitude,
+            longitude: location.longitude
+        };
+        
+        data.step = 'serial';
+        await ctx.reply('✅ Posizione ricevuta!\n\n🔢 **NUMERO SERIALE COLONNINA?**', { parse_mode: 'Markdown' });
     });
 
     // FIX: Definisci createTransaction come funzione normale, non come metodo della scene
