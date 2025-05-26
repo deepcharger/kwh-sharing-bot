@@ -118,7 +118,8 @@ class CommandHandler {
 
             let message = '📊 **I TUOI ANNUNCI ATTIVI:**\n\n';
             for (const ann of announcements) {
-                message += `🆔 ${ann.announcementId}\n`;
+                message += `🆔 \`${ann.announcementId}\`\n`;
+                message += `📍 Posizione: \`${ann.location}\`\n`;
                 message += `💰 Prezzo: `;
                 
                 if (ann.pricingType === 'fixed') {
@@ -164,7 +165,7 @@ class CommandHandler {
                 for (const tx of pending.slice(0, 5)) {
                     const statusEmoji = this.bot.getStatusEmoji(tx.status);
                     const statusText = this.bot.getStatusText(tx.status);
-                    message += `${statusEmoji} ${tx.transactionId.slice(-10)}\n`;
+                    message += `${statusEmoji} \`${tx.transactionId.slice(-10)}\`\n`;
                     message += `📊 ${statusText}\n`;
                     message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
                 }
@@ -207,9 +208,9 @@ class CommandHandler {
                 requestText += `👤 Acquirente: @${buyer?.username || buyer?.firstName || 'utente'}\n`;
                 requestText += `📅 Data/ora: ${transaction.scheduledDate}\n`;
                 requestText += `🏢 Brand: ${transaction.brand}\n`;
-                requestText += `📍 Posizione: ${transaction.location}\n`;
+                requestText += `📍 Posizione: \`${transaction.location}\`\n`;
                 requestText += `🔌 Connettore: ${transaction.connector}\n\n`;
-                requestText += `🔍 ID Transazione: \`${transaction.transactionId}\``;
+                requestText += `🆔 ID Transazione: \`${transaction.transactionId}\``;
                 
                 const keyboard = {
                     inline_keyboard: [
@@ -260,6 +261,108 @@ class CommandHandler {
                 reply_markup: Keyboards.getHelpKeyboard().reply_markup,
                 messageType: 'help'
             });
+        });
+
+        // Quick access to transaction from message
+        this.bot.bot.hears(/[TA][\d\w_-]+/, async (ctx) => {
+            const transactionId = ctx.message.text.match(/([TA][\d\w_-]+)/)[1];
+            const userId = ctx.from.id;
+            
+            const transaction = await this.bot.transactionService.getTransaction(transactionId);
+            
+            if (!transaction) {
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Transazione non trovata.');
+                return;
+            }
+            
+            if (transaction.sellerId !== userId && transaction.buyerId !== userId) {
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Non autorizzato.');
+                return;
+            }
+            
+            ctx.session.transactionId = transactionId;
+            await this.bot.chatCleaner.enterScene(ctx, 'transactionScene');
+        });
+
+        // Command per pagamenti
+        this.bot.bot.command('pagamenti', async (ctx) => {
+            const userId = ctx.from.id;
+            
+            const transactions = await this.bot.transactionService.getUserTransactions(userId, 'all');
+            const paymentPending = transactions.filter(t => 
+                t.status === 'payment_requested' && t.buyerId === userId
+            );
+            
+            if (paymentPending.length === 0) {
+                await this.bot.chatCleaner.sendTemporaryMessage(ctx,
+                    '✅ Non hai pagamenti in sospeso.',
+                    {},
+                    3000
+                );
+                
+                setTimeout(async () => {
+                    await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
+                }, 3000);
+                return;
+            }
+            
+            const announcements = await Promise.all(
+                paymentPending.map(tx => 
+                    this.bot.announcementService.getAnnouncement(tx.announcementId)
+                )
+            );
+            
+            let message = '💳 **PAGAMENTI IN SOSPESO**\n\n';
+            
+            paymentPending.forEach((tx, index) => {
+                const announcement = announcements[index];
+                const amount = announcement && tx.declaredKwh ? 
+                    (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                
+                message += `💰 €${amount} (${tx.declaredKwh || 'N/A'} KWH × ${announcement?.price || '?'}€)\n`;
+                message += `🆔 \`${tx.transactionId}\`\n`;
+                message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n`;
+                message += `💳 Metodi: ${announcement?.paymentMethods || 'Come concordato'}\n\n`;
+            });
+            
+            if (paymentPending.length === 1) {
+                const tx = paymentPending[0];
+                const announcement = announcements[0];
+                const amount = announcement && tx.declaredKwh ? 
+                    (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                
+                message += `\n💳 **PROCEDI CON IL PAGAMENTO:**\n`;
+                message += `Effettua il pagamento di €${amount} secondo i metodi concordati, poi conferma.`;
+                
+                ctx.session.currentTransactionId = tx.transactionId;
+                
+                await this.bot.chatCleaner.replaceMessage(ctx, message, {
+                    parse_mode: 'Markdown',
+                    reply_markup: Keyboards.getPaymentConfirmationKeyboard().reply_markup,
+                    messageType: 'payment'
+                });
+            } else {
+                const keyboardButtons = paymentPending.map((tx, index) => {
+                    const announcement = announcements[index];
+                    const amount = announcement && tx.declaredKwh ? 
+                        (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                    
+                    return [{
+                        text: `💳 ${tx.transactionId.slice(-10)} - €${amount}`,
+                        callback_data: `select_payment_${tx.transactionId}`
+                    }];
+                });
+                
+                message += 'Seleziona una transazione per gestire il pagamento:';
+                
+                await this.bot.chatCleaner.replaceMessage(ctx, message, {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: keyboardButtons
+                    },
+                    messageType: 'payment'
+                });
+            }
         });
     }
 }
