@@ -308,7 +308,7 @@ class CallbackHandler {
     }
 
     setupTransactionCallbacks() {
-        // Transaction requests handling
+        // Transaction requests handling - VERSIONE AGGIORNATA
         this.bot.bot.action(/^accept_request_(.+)$/, async (ctx) => {
             await ctx.answerCbQuery();
             
@@ -326,13 +326,24 @@ class CallbackHandler {
             );
 
             try {
+                // Notifica l'acquirente con il nuovo messaggio e bottone
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.buyerId } },
-                    `✅ *Richiesta accettata!*\n\n` +
-                    `Il venditore ha confermato la tua richiesta per ${transaction.scheduledDate}.\n` +
-                    `Ti avviseremo quando sarà il momento della ricarica.\n\n` +
+                    `✅ **RICHIESTA ACCETTATA!**\n\n` +
+                    `Il venditore ha confermato la tua richiesta per ${transaction.scheduledDate}.\n\n` +
+                    `📍 **Posizione:** \`${transaction.location}\`\n` +
+                    `🏢 **Brand:** ${transaction.brand}\n` +
+                    `🔌 **Connettore:** ${transaction.connector}\n\n` +
+                    `⚠️ **IMPORTANTE:** Quando arrivi alla colonnina e sei pronto per ricaricare, premi il bottone sotto per avvisare il venditore.\n\n` +
                     `🔍 ID Transazione: \`${transactionId}\``,
-                    { parse_mode: 'Markdown' }
+                    { 
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '📍 Sono arrivato alla colonnina', callback_data: `arrived_at_station_${transactionId}` }]
+                            ]
+                        }
+                    }
                 );
             } catch (error) {
                 console.error('Error notifying buyer:', error);
@@ -340,28 +351,100 @@ class CallbackHandler {
 
             await this.bot.chatCleaner.sendConfirmationMessage(ctx,
                 '✅ Richiesta accettata! L\'acquirente è stato notificato.\n\n' +
-                'Riceverai una notifica quando sarà il momento di attivare la ricarica.'
+                'Riceverai una notifica quando l\'acquirente sarà arrivato alla colonnina.'
             );
             
-            // Schedule reminder for charging time
+            // Imposta un reminder dopo 30 minuti se l'acquirente non ha confermato l'arrivo
             setTimeout(async () => {
-                try {
-                    await this.bot.chatCleaner.sendPersistentMessage(
-                        { telegram: ctx.telegram, from: { id: transaction.sellerId } },
-                        `⏰ È il momento di attivare la ricarica!\n\n` +
-                        `ID Transazione: \`${transactionId}\`\n` +
-                        `Data/ora: ${transaction.scheduledDate}\n` +
-                        `Colonnina: ${transaction.brand}\n` +
-                        `Posizione: ${transaction.location}`,
-                        {
-                            parse_mode: 'Markdown',
-                            reply_markup: Keyboards.getActivateChargingKeyboard().reply_markup
-                        }
-                    );
-                } catch (error) {
-                    console.error('Error sending charging reminder:', error);
+                const updatedTransaction = await this.bot.transactionService.getTransaction(transactionId);
+                
+                // Se lo stato è ancora 'confirmed' (non è arrivato), invia reminder
+                if (updatedTransaction && updatedTransaction.status === 'confirmed') {
+                    try {
+                        await this.bot.chatCleaner.sendPersistentMessage(
+                            { telegram: ctx.telegram, from: { id: transaction.buyerId } },
+                            `⏰ **PROMEMORIA**\n\n` +
+                            `La tua ricarica è prevista per ${transaction.scheduledDate}.\n\n` +
+                            `Quando arrivi alla colonnina, ricordati di premere il bottone per avvisare il venditore!\n\n` +
+                            `🔍 ID Transazione: \`${transactionId}\``,
+                            { 
+                                parse_mode: 'Markdown',
+                                reply_markup: {
+                                    inline_keyboard: [
+                                        [{ text: '📍 Sono arrivato alla colonnina', callback_data: `arrived_at_station_${transactionId}` }]
+                                    ]
+                                }
+                            }
+                        );
+                    } catch (error) {
+                        console.error('Error sending arrival reminder:', error);
+                    }
                 }
-            }, 30000);
+            }, 30 * 60 * 1000); // 30 minuti
+        });
+
+        // NUOVO CALLBACK: Gestione arrivo dell'acquirente
+        this.bot.bot.action(/^arrived_at_station_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const transactionId = ctx.match[1];
+            const transaction = await this.bot.transactionService.getTransaction(transactionId);
+            
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            // Verifica che sia l'acquirente
+            if (ctx.from.id !== transaction.buyerId) {
+                await ctx.answerCbQuery('❌ Non sei autorizzato.', { show_alert: true });
+                return;
+            }
+            
+            // Aggiorna lo stato a "buyer_arrived"
+            await this.bot.transactionService.updateTransactionStatus(
+                transactionId,
+                'buyer_arrived'
+            );
+            
+            // Conferma all'acquirente
+            await ctx.editMessageText(
+                `✅ **CONFERMATO!**\n\n` +
+                `Il venditore è stato avvisato che sei arrivato alla colonnina.\n\n` +
+                `⏳ Attendi che il venditore attivi la ricarica.\n\n` +
+                `💡 **Suggerimenti:**\n` +
+                `• Verifica che il connettore sia quello giusto\n` +
+                `• Assicurati che l'auto sia pronta per ricevere la ricarica\n` +
+                `• Tieni il cavo a portata di mano\n\n` +
+                `🔍 ID Transazione: \`${transactionId}\``,
+                { parse_mode: 'Markdown' }
+            );
+            
+            // Notifica il venditore
+            try {
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.sellerId } },
+                    `⏰ **L'ACQUIRENTE È ARRIVATO!**\n\n` +
+                    `L'acquirente @${ctx.from.username || ctx.from.first_name} è arrivato alla colonnina ed è pronto per ricaricare.\n\n` +
+                    `📍 **Posizione:** \`${transaction.location}\`\n` +
+                    `🏢 **Colonnina:** ${transaction.brand}\n` +
+                    `🔌 **Connettore:** ${transaction.connector}\n` +
+                    `🔍 **ID Transazione:** \`${transactionId}\`\n\n` +
+                    `È il momento di attivare la ricarica!`,
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '⚡ Attiva ricarica ORA', callback_data: 'activate_charging' }],
+                                [{ text: '⏸️ Ritarda di 5 min', callback_data: 'delay_charging' }],
+                                [{ text: '❌ Problemi tecnici', callback_data: 'technical_issues' }]
+                            ]
+                        }
+                    }
+                );
+            } catch (error) {
+                console.error('Error notifying seller:', error);
+            }
         });
 
         this.bot.bot.action(/^reject_request_(.+)$/, async (ctx) => {
@@ -1183,10 +1266,11 @@ class CallbackHandler {
                 `2️⃣ **Contatta venditore:** Clicca "Contatta venditore"\n` +
                 `3️⃣ **Fornisci dettagli:** Data, colonnina, connettore\n` +
                 `4️⃣ **Attendi conferma:** Il venditore deve accettare\n` +
-                `5️⃣ **Ricarica:** Segui le istruzioni per l'attivazione\n` +
-                `6️⃣ **Foto display:** Scatta foto dei KWH ricevuti\n` +
-                `7️⃣ **Pagamento:** Paga come concordato\n` +
-                `8️⃣ **Feedback:** Lascia una valutazione\n\n` +
+                `5️⃣ **Conferma arrivo:** Quando sei alla colonnina\n` +
+                `6️⃣ **Ricarica:** Segui le istruzioni per l'attivazione\n` +
+                `7️⃣ **Foto display:** Scatta foto dei KWH ricevuti\n` +
+                `8️⃣ **Pagamento:** Paga come concordato\n` +
+                `9️⃣ **Feedback:** Lascia una valutazione\n\n` +
                 `💡 **Suggerimenti:**\n` +
                 `• Verifica sempre i dettagli prima di confermare\n` +
                 `• Scatta foto nitide del display\n` +
