@@ -242,10 +242,10 @@ class AnnouncementService {
         
         message += sellerInfo + '\n';
         
-        // IMPORTANTE: Posizione copiabile con backtick
-        message += `📍 Posizione: \`${announcement.location}\`\n`;
+        // ID annuncio all'inizio per visibilità
+        message += `🆔 ID annuncio: \`${announcement.announcementId}\`\n`;
         
-        // Pricing compatto
+        // Pricing
         if (announcement.pricingType === 'fixed') {
             message += `💰 Prezzo: ${announcement.basePrice || announcement.price}€/KWH`;
             if (announcement.minimumKwh) {
@@ -272,18 +272,28 @@ class AnnouncementService {
             message += `⚡ Corrente: ${announcement.currentType}\n`;
         }
         
-        // Zone (compatte)
-        if (announcement.zones) {
-            message += `📍 Zone: ${announcement.zones}\n`;
+        // Reti
+        if (announcement.networks) {
+            message += `🌐 Reti attivabili: ${announcement.networks}\n`;
         }
         
-        // Disponibilità (solo se diversa da sempre)
-        if (announcement.availability && announcement.availability !== 'Sempre disponibile') {
-            message += `⏰ ${announcement.availability}\n`;
+        // Disponibilità (mostra sempre)
+        if (announcement.availability) {
+            message += `⏰ Disponibilità: ${announcement.availability}\n`;
         }
         
-        // ID copiabile
-        message += `\n🆔 ID: \`${announcement.announcementId}\``;
+        // Pagamenti (usa il campo corretto)
+        if (announcement.paymentMethods) {
+            message += `💳 Pagamento: ${announcement.paymentMethods}\n`;
+        }
+        
+        // Descrizione/Condizioni
+        if (announcement.description && announcement.description.trim() !== '') {
+            message += `📋 Condizioni: ${announcement.description}\n`;
+        }
+        
+        // Invito feedback alla fine
+        message += `\n💬 Dopo la compravendita, il venditore inviterà l'acquirente a esprimere un giudizio sulla transazione.`;
         
         return message;
     }
