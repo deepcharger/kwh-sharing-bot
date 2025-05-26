@@ -1,207 +1,151 @@
-const axios = require('axios');
+const mongoose = require('mongoose');
+const UserModel = require('../models/UserModel');
+const logger = require('../utils/logger');
 
 class UserService {
-    constructor(database) {
-        this.db = database;
-        this.users = database.getCollection('users');
-        this.feedback = database.getCollection('feedback');
-    }
-
-    async upsertUser(userData) {
+    static async createUser(userData) {
         try {
-            const result = await this.users.updateOne(
-                { userId: userData.userId },
-                { 
-                    $set: {
-                        ...userData,
-                        updatedAt: new Date()
-                    },
-                    $setOnInsert: {
-                        createdAt: new Date(),
-                        totalTransactions: 0,
-                        totalKwhSold: 0,
-                        totalKwhBought: 0,
-                        rating: 0,
-                        feedbackCount: 0
-                    }
-                },
-                { upsert: true }
-            );
+            const existingUser = await UserModel.findByUserId(userData.userId);
             
-            return result;
+            if (existingUser) {
+                // Aggiorna dati esistenti
+                existingUser.username = userData.username;
+                existingUser.firstName = userData.firstName;
+                existingUser.lastName = userData.lastName;
+                existingUser.lastActivity = new Date();
+                
+                await existingUser.save();
+                logger.info(`User updated: ${userData.userId}`);
+                return existingUser;
+            }
+            
+            // Crea nuovo utente
+            const newUser = new UserModel({
+                userId: userData.userId,
+                username: userData.username,
+                firstName: userData.firstName,
+                lastName: userData.lastName
+            });
+            
+            await newUser.save();
+            logger.info(`New user created: ${userData.userId}`);
+            return newUser;
+            
         } catch (error) {
-            console.error('Errore upsert utente:', error);
+            logger.error('Error in createUser:', error);
             throw error;
         }
     }
 
-    async getUser(userId) {
+    static async getUserById(userId) {
         try {
-            return await this.users.findOne({ userId });
+            return await UserModel.findByUserId(userId);
         } catch (error) {
-            console.error('Errore get utente:', error);
-            return null;
+            logger.error('Error in getUserById:', error);
+            throw error;
         }
     }
 
-    async isUserInGroup(userId, groupId) {
+    static async updateUserActivity(userId) {
         try {
-            // Verifica se l'utente è membro del gruppo tramite API Telegram
-            const botToken = process.env.BOT_TOKEN;
-            const response = await axios.get(
-                `https://api.telegram.org/bot${botToken}/getChatMember`,
-                {
-                    params: {
-                        chat_id: groupId,
-                        user_id: userId
-                    }
-                }
-            );
+            const user = await UserModel.findByUserId(userId);
+            if (user) {
+                await user.updateActivity();
+            }
+        } catch (error) {
+            logger.error('Error in updateUserActivity:', error);
+        }
+    }
 
-            const status = response.data.result.status;
-            return ['creator', 'administrator', 'member'].includes(status);
+    static async updateUserStats(userId, transactionData) {
+        try {
+            const user = await UserModel.findByUserId(userId);
+            if (!user) return;
+
+            // Aggiorna statistiche
+            user.totalTransactions += 1;
+            
+            if (transactionData.type === 'buy') {
+                user.totalKwhBought += transactionData.kwh;
+                user.totalSpent += transactionData.amount;
+            } else if (transactionData.type === 'sell') {
+                user.totalKwhSold += transactionData.kwh;
+                user.totalEarned += transactionData.amount;
+            }
+
+            await user.save();
+            logger.info(`User stats updated: ${userId}`);
             
         } catch (error) {
-            // Se la chiamata API fallisce, assumiamo che l'utente non sia nel gruppo
-            console.log(`Utente ${userId} non trovato nel gruppo o errore API:`, error.response?.data?.description);
-            return false;
+            logger.error('Error in updateUserStats:', error);
+            throw error;
         }
     }
 
-    async getUserStats(userId) {
+    static async updateUserRating(userId, newRating) {
         try {
-            const user = await this.getUser(userId);
-            if (!user) return null;
+            const user = await UserModel.findByUserId(userId);
+            if (!user) return;
 
-            // Calcola statistiche feedback
-            const feedbackStats = await this.calculateFeedbackStats(userId);
+            // Calcola nuovo rating medio
+            const totalPoints = (user.averageRating * user.totalRatings) + newRating;
+            user.totalRatings += 1;
+            user.averageRating = totalPoints / user.totalRatings;
+
+            await user.save();
+            logger.info(`User rating updated: ${userId} - New avg: ${user.averageRating}`);
             
-            return {
-                ...user,
-                ...feedbackStats
-            };
         } catch (error) {
-            console.error('Errore get stats utente:', error);
-            return null;
+            logger.error('Error in updateUserRating:', error);
+            throw error;
         }
     }
 
-    async calculateFeedbackStats(userId) {
+    static async getUsersStats() {
         try {
-            const pipeline = [
-                { $match: { toUserId: userId } }, // Fix: era userId invece di toUserId
+            const stats = await UserModel.aggregate([
                 {
                     $group: {
                         _id: null,
-                        totalFeedback: { $sum: 1 },
-                        totalRating: { $sum: '$rating' },
-                        positiveCount: {
-                            $sum: { $cond: [{ $gte: ['$rating', 4] }, 1, 0] }
+                        totalUsers: { $sum: 1 },
+                        activeUsers: { 
+                            $sum: { $cond: ['$isActive', 1, 0] } 
                         },
-                        negativeCount: {
-                            $sum: { $cond: [{ $lte: ['$rating', 2] }, 1, 0] }
+                        avgRating: { $avg: '$averageRating' },
+                        totalKwhTraded: { 
+                            $sum: { $add: ['$totalKwhBought', '$totalKwhSold'] } 
                         }
                     }
                 }
-            ];
+            ]);
 
-            const result = await this.feedback.aggregate(pipeline).toArray();
-            
-            if (result.length === 0) {
-                return {
-                    totalFeedback: 0,
-                    averageRating: 0,
-                    positivePercentage: 0,
-                    sellerBadge: null
-                };
-            }
-
-            const stats = result[0];
-            const averageRating = stats.totalRating / stats.totalFeedback;
-            const positivePercentage = (stats.positiveCount / stats.totalFeedback) * 100;
-
-            // Determina badge venditore
-            let sellerBadge = null;
-            if (stats.totalFeedback >= 5) {
-                if (positivePercentage >= 95) {
-                    sellerBadge = 'TOP';
-                } else if (positivePercentage >= 90) {
-                    sellerBadge = 'AFFIDABILE';
-                }
-            }
-
-            return {
-                totalFeedback: stats.totalFeedback,
-                averageRating: Math.round(averageRating * 10) / 10,
-                positivePercentage: Math.round(positivePercentage * 10) / 10,
-                sellerBadge,
-                positiveCount: stats.positiveCount,
-                negativeCount: stats.negativeCount
+            return stats[0] || {
+                totalUsers: 0,
+                activeUsers: 0,
+                avgRating: 0,
+                totalKwhTraded: 0
             };
             
         } catch (error) {
-            console.error('Errore calcolo stats feedback:', error);
-            return {
-                totalFeedback: 0,
-                averageRating: 0,
-                positivePercentage: 0,
-                sellerBadge: null
-            };
+            logger.error('Error in getUsersStats:', error);
+            throw error;
         }
     }
 
-    async updateUserTransactionStats(userId, kwhAmount, type = 'sell') {
+    static async getTopUsers(limit = 10) {
         try {
-            const updateField = type === 'sell' ? 'totalKwhSold' : 'totalKwhBought';
-            
-            await this.users.updateOne(
-                { userId },
-                { 
-                    $inc: { 
-                        totalTransactions: 1,
-                        [updateField]: kwhAmount
-                    },
-                    $set: { updatedAt: new Date() }
-                }
-            );
+            return await UserModel
+                .find({ 
+                    isActive: true,
+                    totalRatings: { $gte: 5 } // Almeno 5 recensioni
+                })
+                .sort({ averageRating: -1, totalRatings: -1 })
+                .limit(limit)
+                .select('userId username firstName averageRating totalRatings totalKwhSold');
+                
         } catch (error) {
-            console.error('Errore update stats transazione:', error);
-        }
-    }
-
-    async getSellerBadgeText(userId) {
-        const stats = await this.calculateFeedbackStats(userId);
-        
-        if (!stats.sellerBadge) {
-            return '';
-        }
-
-        const badgeEmojis = {
-            'TOP': '🌟🟢 VENDITORE TOP',
-            'AFFIDABILE': '✅🟢 VENDITORE AFFIDABILE'
-        };
-
-        const percentage = stats.positivePercentage.toFixed(1);
-        return `${badgeEmojis[stats.sellerBadge]} (${percentage}% positivi)`;
-    }
-
-    async getAllUsersWithStats() {
-        try {
-            const users = await this.users.find({}).toArray();
-            const usersWithStats = [];
-
-            for (const user of users) {
-                const stats = await this.calculateFeedbackStats(user.userId);
-                usersWithStats.push({
-                    ...user,
-                    ...stats
-                });
-            }
-
-            return usersWithStats;
-        } catch (error) {
-            console.error('Errore get all users:', error);
-            return [];
+            logger.error('Error in getTopUsers:', error);
+            throw error;
         }
     }
 }
