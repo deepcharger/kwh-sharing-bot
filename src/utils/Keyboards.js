@@ -1,13 +1,14 @@
 const { Markup } = require('telegraf');
 
 class Keyboards {
-    // 🚨 FIX PRINCIPALE: Aggiunto .reply_markup alla proprietà MAIN_MENU
+    // Menu principale con bottone Compra KWH
     static get MAIN_MENU() {
         return {
             reply_markup: Markup.keyboard([
-                ['🔋 Vendi KWH', '📥 Richieste pendenti'],
+                ['🔋 Vendi KWH', '🛒 Compra KWH'],
                 ['📊 I miei annunci', '💼 Le mie transazioni'],
-                ['⭐ I miei feedback', '❓ Aiuto']
+                ['📥 Richieste pendenti', '⭐ I miei feedback'],
+                ['❓ Aiuto']
             ]).resize().persistent().reply_markup
         };
     }
@@ -113,7 +114,6 @@ class Keyboards {
     }
 
     static getKwhValidationKeyboard(transactionId) {
-        // Usa un ID corto per evitare il limite di 64 caratteri
         const shortId = this.createShortId(transactionId);
         return Markup.inlineKeyboard([
             [Markup.button.callback('✅ Sì, KWH corretti', `kwh_ok_${shortId}`)],
@@ -122,7 +122,6 @@ class Keyboards {
         ]);
     }
 
-    // FIX PRINCIPALE: Keyboard di conferma pagamento migliorata
     static getPaymentConfirmationKeyboard() {
         return Markup.inlineKeyboard([
             [Markup.button.callback('✅ Sì, ho effettuato il pagamento', 'payment_completed')],
@@ -175,22 +174,19 @@ class Keyboards {
         ]);
     }
 
-    // === KEYBOARDS PER GESTIONE TRANSAZIONI (FIX BUTTON_DATA_INVALID) ===
-
     static getTransactionsKeyboard(pending, completed) {
         const buttons = [];
         
-        // Add pending transactions first (max 8) - usa indici invece di ID completi
+        // Add pending transactions first (max 8)
         pending.slice(0, 8).forEach((tx, index) => {
             const statusText = this.getStatusText(tx.status);
-            // Mostra solo una parte dell'ID per la leggibilità
             const displayId = tx.transactionId.length > 15 ? 
                 tx.transactionId.substring(2, 12) + '...' : 
                 tx.transactionId;
                 
             buttons.push([Markup.button.callback(
                 `${this.getStatusEmoji(tx.status)} ${displayId} - ${statusText}`, 
-                `view_tx_${index}` // Usa indice invece dell'ID completo
+                `view_tx_${index}`
             )]);
         });
         
@@ -242,8 +238,6 @@ class Keyboards {
 
     static getTransactionActionsKeyboard(transactionId, status, isSeller) {
         const buttons = [];
-        
-        // Crea un hash corto dell'ID per evitare il limite di 64 caratteri
         const shortId = this.createShortId(transactionId);
         
         // Add action button based on status
@@ -262,26 +256,21 @@ class Keyboards {
         return Markup.inlineKeyboard(buttons);
     }
 
-    // Metodo helper per creare ID corti (max 10 caratteri)
+    // Metodo helper per creare ID corti
     static createShortId(fullId) {
-        // Prende solo gli ultimi 10 caratteri dell'ID per rimanere sotto i 64 caratteri
-        // nei callback_data che hanno prefissi come "manage_tx_"
         return fullId.slice(-10);
     }
-
-    // === FINE KEYBOARDS TRANSAZIONI ===
 
     static getUserAnnouncementsKeyboard(announcements) {
         const buttons = [];
         
         announcements.slice(0, 10).forEach(ann => {
-            // Usa ID corto anche per gli annunci se necessario
             const displayId = ann.announcementId.length > 20 ? 
                 ann.announcementId.substring(0, 15) + '...' : 
                 ann.announcementId;
                 
             buttons.push([Markup.button.callback(
-                `📋 ${displayId} - ${ann.price}€/KWH`, 
+                `📋 ${displayId} - ${ann.price || ann.basePrice}€/KWH`, 
                 `view_ann_${this.createShortId(ann.announcementId)}`
             )]);
         });
@@ -342,7 +331,6 @@ class Keyboards {
         ]);
     }
 
-    // FIX: Nuovo metodo per gestione pagamenti multipli
     static getMultiplePaymentsKeyboard(transactions) {
         const buttons = [];
         
@@ -359,6 +347,17 @@ class Keyboards {
         buttons.push([Markup.button.callback('🏠 Menu principale', 'back_to_main')]);
         
         return Markup.inlineKeyboard(buttons);
+    }
+
+    // Tastiera inline per compra/vendi
+    static getBuySellKeyboard() {
+        return Markup.inlineKeyboard([
+            [
+                Markup.button.callback('🔋 Vendi energia', 'sell_energy'),
+                Markup.button.callback('🛒 Compra energia', 'buy_energy')
+            ],
+            [Markup.button.callback('🏠 Menu principale', 'back_to_main')]
+        ]);
     }
 }
 
