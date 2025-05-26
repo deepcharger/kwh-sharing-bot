@@ -24,7 +24,6 @@ class Keyboards {
             [Markup.button.callback('🔌 Solo DC', 'current_dc_only')],
             [Markup.button.callback('⚡ Solo AC', 'current_ac_only')],
             [Markup.button.callback('🔋 Entrambi DC e AC', 'current_both')],
-            [Markup.button.callback('⚡ DC minimo 30 KW', 'current_dc_min_30')],
             [Markup.button.callback('❌ Annulla', 'cancel')]
         ]);
     }
