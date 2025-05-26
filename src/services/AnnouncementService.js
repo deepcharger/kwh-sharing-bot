@@ -1,268 +1,291 @@
-const { v4: uuidv4 } = require('uuid');
-const moment = require('moment');
+const mongoose = require('mongoose');
+const AnnouncementModel = require('../models/AnnouncementModel');
+const User = require('../models/UserModel');
+const logger = require('../utils/logger');
 
 class AnnouncementService {
-    constructor(database) {
-        this.db = database;
-        this.announcements = database.getCollection('announcements');
-        this.archivedMessages = database.getCollection('archived_messages');
-    }
-
-    async createAnnouncement(userId, announcementData) {
+    static async createAnnouncement(data) {
         try {
-            // Genera ID univoco per l'annuncio - USA TRATTINO INVECE DI UNDERSCORE
-            const timestamp = moment().format('YYYYMMDDHHmmss');
-            const announcementId = `A${userId}-${timestamp}`;
-            
-            const announcement = {
-                announcementId,
-                userId,
-                type: 'sell', // Per ora solo vendita
-                price: announcementData.price,
-                currentType: announcementData.currentType,
-                zones: announcementData.zones,
-                networks: announcementData.networks,
-                networksList: announcementData.networksList || [],
-                availability: announcementData.availability,
-                paymentMethods: announcementData.paymentMethods,
-                conditions: announcementData.conditions || '',
-                active: true,
-                messageId: null, // Sarà aggiornato dopo la pubblicazione
+            // Validazione dati obbligatori
+            if (!data.userId || !data.location || !data.description) {
+                throw new Error('Dati obbligatori mancanti');
+            }
+
+            // Validazione pricing
+            if (!data.pricingType || !['fixed', 'graduated'].includes(data.pricingType)) {
+                throw new Error('Tipo di prezzo non valido');
+            }
+
+            if (data.pricingType === 'fixed' && (!data.basePrice || data.basePrice <= 0)) {
+                throw new Error('Prezzo fisso non valido');
+            }
+
+            if (data.pricingType === 'graduated') {
+                if (!data.pricingTiers || !Array.isArray(data.pricingTiers) || data.pricingTiers.length === 0) {
+                    throw new Error('Fasce di prezzo non valide');
+                }
+
+                // Validazione fasce
+                for (let i = 0; i < data.pricingTiers.length; i++) {
+                    const tier = data.pricingTiers[i];
+                    if (!tier.price || tier.price <= 0) {
+                        throw new Error(`Prezzo fascia ${i + 1} non valido`);
+                    }
+                    if (i < data.pricingTiers.length - 1 && (!tier.limit || tier.limit <= 0)) {
+                        throw new Error(`Limite fascia ${i + 1} non valido`);
+                    }
+                    if (i === data.pricingTiers.length - 1 && tier.limit !== null) {
+                        throw new Error('L\'ultima fascia deve avere limite null');
+                    }
+                }
+
+                // Ordinamento fasce per limite crescente
+                data.pricingTiers.sort((a, b) => {
+                    if (a.limit === null) return 1;
+                    if (b.limit === null) return -1;
+                    return a.limit - b.limit;
+                });
+            }
+
+            // Validazione KWH minimi
+            if (data.minimumKwh && (isNaN(data.minimumKwh) || data.minimumKwh <= 0)) {
+                throw new Error('KWH minimi non validi');
+            }
+
+            const announcement = new AnnouncementModel({
+                userId: data.userId,
+                location: data.location,
+                description: data.description,
+                availability: data.availability || 'Sempre disponibile',
+                contactInfo: data.contactInfo,
+                
+                // Nuovo sistema prezzi
+                pricingType: data.pricingType,
+                basePrice: data.pricingType === 'fixed' ? data.basePrice : undefined,
+                pricingTiers: data.pricingType === 'graduated' ? data.pricingTiers : undefined,
+                minimumKwh: data.minimumKwh || null,
+                
+                isActive: true,
                 createdAt: new Date(),
                 updatedAt: new Date()
-            };
+            });
 
-            const result = await this.announcements.insertOne(announcement);
-            return { ...announcement, _id: result.insertedId };
-            
+            await announcement.save();
+            logger.info(`Annuncio creato con ID: ${announcement._id}`);
+            return announcement;
         } catch (error) {
-            console.error('Errore creazione annuncio:', error);
+            logger.error('Errore nella creazione dell\'annuncio:', error);
             throw error;
         }
     }
 
-    async getAnnouncement(announcementId) {
+    static async getActiveAnnouncements(limit = 10, skip = 0) {
         try {
-            return await this.announcements.findOne({ 
-                announcementId,
-                active: true 
-            });
-        } catch (error) {
-            console.error('Errore get annuncio:', error);
-            return null;
-        }
-    }
-
-    async getUserAnnouncements(userId) {
-        try {
-            return await this.announcements
-                .find({ userId, active: true })
-                .sort({ createdAt: -1 })
-                .toArray();
-        } catch (error) {
-            console.error('Errore get annunci utente:', error);
-            return [];
-        }
-    }
-
-    async updateAnnouncementMessageId(announcementId, messageId) {
-        try {
-            await this.announcements.updateOne(
-                { announcementId },
-                { 
-                    $set: { 
-                        messageId,
-                        updatedAt: new Date()
-                    }
-                }
-            );
-        } catch (error) {
-            console.error('Errore update message ID:', error);
-        }
-    }
-
-    async archiveUserPreviousAnnouncement(userId) {
-        try {
-            // Trova l'annuncio attivo precedente dell'utente
-            const previousAnnouncement = await this.announcements.findOne({
-                userId,
-                active: true
-            });
-
-            if (previousAnnouncement && previousAnnouncement.messageId) {
-                // Archivia il messaggio precedente
-                await this.archivedMessages.insertOne({
-                    ...previousAnnouncement,
-                    archivedAt: new Date(),
-                    reason: 'new_announcement'
-                });
-
-                // Disattiva l'annuncio precedente
-                await this.announcements.updateOne(
-                    { _id: previousAnnouncement._id },
-                    { 
-                        $set: { 
-                            active: false,
-                            archivedAt: new Date()
-                        }
-                    }
-                );
-
-                return previousAnnouncement.messageId;
-            }
-
-            return null;
-        } catch (error) {
-            console.error('Errore archiviazione annuncio precedente:', error);
-            return null;
-        }
-    }
-
-    async formatAnnouncementMessage(announcement, userStats) {
-        try {
-            const currentTypeText = this.formatCurrentType(announcement.currentType);
-            const networksText = this.formatNetworks(announcement.networksList || announcement.networks);
-            const sellerBadge = this.formatSellerBadge(userStats);
-            
-            let message = `🔋 Vendita kWh sharing\n`;
-            message += `📱 ID annuncio: ${announcement.announcementId}\n`;
-            message += `👤 Venditore: @${announcement.username || 'utente'}\n`;
-            
-            if (sellerBadge) {
-                message += `⭐ ${sellerBadge}\n`;
-            }
-            
-            message += `\n💰 Prezzo: ${announcement.price}€ AL KWH\n`;
-            message += `⚡ Corrente: ${currentTypeText}\n`;
-            message += `🌍 Reti attivabili: ${networksText}\n`;
-            message += `⏰ Disponibilità: ${announcement.availability}\n`;
-            message += `💳 Pagamento: ${announcement.paymentMethods}\n`;
-            
-            if (announcement.conditions) {
-                message += `📋 Condizioni: ${announcement.conditions}\n`;
-            }
-            
-            message += `\n📞 Dopo la compravendita, il venditore inviterà l'acquirente a esprimere un giudizio sulla transazione.`;
-            
-            return message;
-        } catch (error) {
-            console.error('Errore formattazione messaggio:', error);
-            return 'Errore nella formattazione dell\'annuncio';
-        }
-    }
-
-    formatCurrentType(currentType) {
-        const types = {
-            'dc_only': 'SOLO DC',
-            'ac_only': 'SOLO AC',
-            'both': 'DC E AC',
-            'dc_min_30': 'SOLO DC E MINIMO 30 KW'
-        };
-        return types[currentType] || currentType;
-    }
-
-    formatNetworks(networks) {
-        if (networks === 'all') {
-            return 'TUTTE LE COLONNINE';
-        }
-        if (Array.isArray(networks)) {
-            return networks.length > 5 ? 'TUTTE LE COLONNINE' : networks.join(', ');
-        }
-        return networks || 'TUTTE LE COLONNINE';
-    }
-
-    formatSellerBadge(userStats) {
-        if (!userStats || userStats.totalFeedback < 5) {
-            return null;
-        }
-
-        const percentage = userStats.positivePercentage;
-        
-        if (percentage >= 95) {
-            return `🌟🟢 VENDITORE TOP (${percentage.toFixed(1)}% positivi)`;
-        } else if (percentage >= 90) {
-            return `✅🟢 VENDITORE AFFIDABILE (${percentage.toFixed(1)}% positivi)`;
-        }
-        
-        return null;
-    }
-
-    async deleteAnnouncement(announcementId, userId) {
-        try {
-            const result = await this.announcements.updateOne(
-                { announcementId, userId },
-                { 
-                    $set: { 
-                        active: false,
-                        deletedAt: new Date()
-                    }
-                }
-            );
-            
-            return result.modifiedCount > 0;
-        } catch (error) {
-            console.error('Errore eliminazione annuncio:', error);
-            return false;
-        }
-    }
-
-    async getActiveAnnouncements(limit = 50) {
-        try {
-            return await this.announcements
-                .find({ active: true })
+            const announcements = await AnnouncementModel
+                .find({ isActive: true })
+                .populate('userId', 'username firstName lastName')
                 .sort({ createdAt: -1 })
                 .limit(limit)
-                .toArray();
+                .skip(skip);
+
+            return announcements;
         } catch (error) {
-            console.error('Errore get annunci attivi:', error);
-            return [];
+            logger.error('Errore nel recupero degli annunci:', error);
+            throw error;
         }
     }
 
-    async updateAnnouncementData(announcementId, updateData) {
+    static async getAnnouncementById(id) {
         try {
-            const result = await this.announcements.updateOne(
-                { announcementId, active: true },
-                { 
-                    $set: {
-                        ...updateData,
-                        updatedAt: new Date()
+            if (!mongoose.Types.ObjectId.isValid(id)) {
+                throw new Error('ID annuncio non valido');
+            }
+
+            const announcement = await AnnouncementModel
+                .findById(id)
+                .populate('userId', 'username firstName lastName');
+
+            return announcement;
+        } catch (error) {
+            logger.error('Errore nel recupero dell\'annuncio:', error);
+            throw error;
+        }
+    }
+
+    static async getUserAnnouncements(userId) {
+        try {
+            const announcements = await AnnouncementModel
+                .find({ userId })
+                .sort({ createdAt: -1 });
+
+            return announcements;
+        } catch (error) {
+            logger.error('Errore nel recupero degli annunci utente:', error);
+            throw error;
+        }
+    }
+
+    static async updateAnnouncement(id, data) {
+        try {
+            if (!mongoose.Types.ObjectId.isValid(id)) {
+                throw new Error('ID annuncio non valido');
+            }
+
+            // Validazione pricing se modificato
+            if (data.pricingType) {
+                if (!['fixed', 'graduated'].includes(data.pricingType)) {
+                    throw new Error('Tipo di prezzo non valido');
+                }
+
+                if (data.pricingType === 'fixed' && (!data.basePrice || data.basePrice <= 0)) {
+                    throw new Error('Prezzo fisso non valido');
+                }
+
+                if (data.pricingType === 'graduated') {
+                    if (!data.pricingTiers || !Array.isArray(data.pricingTiers) || data.pricingTiers.length === 0) {
+                        throw new Error('Fasce di prezzo non valide');
                     }
                 }
+            }
+
+            const announcement = await AnnouncementModel.findByIdAndUpdate(
+                id,
+                { ...data, updatedAt: new Date() },
+                { new: true }
             );
-            
-            return result.modifiedCount > 0;
+
+            if (!announcement) {
+                throw new Error('Annuncio non trovato');
+            }
+
+            logger.info(`Annuncio aggiornato: ${id}`);
+            return announcement;
         } catch (error) {
-            console.error('Errore update annuncio:', error);
-            return false;
+            logger.error('Errore nell\'aggiornamento dell\'annuncio:', error);
+            throw error;
         }
     }
 
-    async getAnnouncementStats() {
+    static async deleteAnnouncement(id, userId) {
         try {
-            const pipeline = [
-                { $match: { active: true } },
+            if (!mongoose.Types.ObjectId.isValid(id)) {
+                throw new Error('ID annuncio non valido');
+            }
+
+            const announcement = await AnnouncementModel.findOneAndUpdate(
+                { _id: id, userId },
+                { isActive: false, updatedAt: new Date() },
+                { new: true }
+            );
+
+            if (!announcement) {
+                throw new Error('Annuncio non trovato o non autorizzato');
+            }
+
+            logger.info(`Annuncio eliminato: ${id}`);
+            return announcement;
+        } catch (error) {
+            logger.error('Errore nell\'eliminazione dell\'annuncio:', error);
+            throw error;
+        }
+    }
+
+    static async searchAnnouncements(filters) {
+        try {
+            const query = { isActive: true };
+
+            if (filters.location) {
+                query.location = { $regex: filters.location, $options: 'i' };
+            }
+
+            if (filters.maxPrice) {
+                // Per la ricerca, consideriamo il prezzo base o il primo tier
+                query.$or = [
+                    { pricingType: 'fixed', basePrice: { $lte: filters.maxPrice } },
+                    { 
+                        pricingType: 'graduated', 
+                        'pricingTiers.0.price': { $lte: filters.maxPrice } 
+                    }
+                ];
+            }
+
+            const announcements = await AnnouncementModel
+                .find(query)
+                .populate('userId', 'username firstName lastName')
+                .sort({ createdAt: -1 });
+
+            return announcements;
+        } catch (error) {
+            logger.error('Errore nella ricerca degli annunci:', error);
+            throw error;
+        }
+    }
+
+    // Nuova funzione per calcolare il prezzo basato sui KWH
+    static calculatePrice(announcement, kwhAmount) {
+        try {
+            if (!announcement || !kwhAmount || kwhAmount <= 0) {
+                throw new Error('Parametri non validi per il calcolo del prezzo');
+            }
+
+            // Applica minimo se presente
+            const finalKwh = Math.max(kwhAmount, announcement.minimumKwh || 0);
+
+            if (announcement.pricingType === 'fixed') {
+                return {
+                    totalAmount: finalKwh * announcement.basePrice,
+                    kwhUsed: finalKwh,
+                    pricePerKwh: announcement.basePrice,
+                    appliedMinimum: finalKwh > kwhAmount
+                };
+            }
+
+            if (announcement.pricingType === 'graduated') {
+                // Trova la fascia appropriata
+                let applicableTier = announcement.pricingTiers[announcement.pricingTiers.length - 1]; // Default ultima fascia
+                
+                for (let tier of announcement.pricingTiers) {
+                    if (tier.limit === null || finalKwh <= tier.limit) {
+                        applicableTier = tier;
+                        break;
+                    }
+                }
+
+                return {
+                    totalAmount: finalKwh * applicableTier.price,
+                    kwhUsed: finalKwh,
+                    pricePerKwh: applicableTier.price,
+                    appliedTier: applicableTier,
+                    appliedMinimum: finalKwh > kwhAmount
+                };
+            }
+
+            throw new Error('Tipo di prezzo non supportato');
+        } catch (error) {
+            logger.error('Errore nel calcolo del prezzo:', error);
+            throw error;
+        }
+    }
+
+    // Funzione per ottenere statistiche annunci
+    static async getAnnouncementStats(userId) {
+        try {
+            const stats = await AnnouncementModel.aggregate([
+                { $match: { userId: new mongoose.Types.ObjectId(userId) } },
                 {
                     $group: {
                         _id: null,
-                        totalActive: { $sum: 1 },
-                        avgPrice: { $avg: '$price' },
-                        minPrice: { $min: '$price' },
-                        maxPrice: { $max: '$price' }
+                        total: { $sum: 1 },
+                        active: { $sum: { $cond: ['$isActive', 1, 0] } },
+                        inactive: { $sum: { $cond: ['$isActive', 0, 1] } }
                     }
                 }
-            ];
+            ]);
 
-            const result = await this.announcements.aggregate(pipeline).toArray();
-            return result[0] || {
-                totalActive: 0,
-                avgPrice: 0,
-                minPrice: 0,
-                maxPrice: 0
-            };
+            return stats[0] || { total: 0, active: 0, inactive: 0 };
         } catch (error) {
-            console.error('Errore get stats annunci:', error);
-            return null;
+            logger.error('Errore nel calcolo delle statistiche:', error);
+            throw error;
         }
     }
 }
