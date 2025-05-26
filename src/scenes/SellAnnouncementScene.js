@@ -103,6 +103,27 @@ function createSellAnnouncementScene(bot) {
         }
     });
 
+    // Gestione posizione inviata tramite Telegram
+    scene.on('location', async (ctx) => {
+        if (ctx.session.step === 'location') {
+            const location = ctx.message.location;
+            const locationText = `Lat: ${location.latitude}, Long: ${location.longitude}`;
+            
+            ctx.session.announcementData.location = locationText;
+            ctx.session.announcementData.coordinates = {
+                latitude: location.latitude,
+                longitude: location.longitude
+            };
+            
+            await ctx.reply(
+                '📍 Posizione GPS ricevuta!\n\n' +
+                'Ora aggiungi una descrizione testuale per aiutare gli acquirenti (es: "Parcheggio Centro Commerciale X, Piano -1"):',
+                { parse_mode: 'Markdown' }
+            );
+            ctx.session.step = 'location_description';
+        }
+    });
+
     async function handleFixedPrice(ctx, price) {
         const priceNum = parseFloat(price.replace(',', '.'));
         
@@ -123,7 +144,8 @@ function createSellAnnouncementScene(bot) {
                 reply_markup: {
                     inline_keyboard: [
                         [{ text: '✅ Sì, imposta minimo', callback_data: 'set_minimum' }],
-                        [{ text: '❌ No, continua', callback_data: 'skip_minimum' }]
+                        [{ text: '❌ No, continua', callback_data: 'skip_minimum' }],
+                        [{ text: '🔙 Annulla', callback_data: 'cancel' }]
                     ]
                 }
             }
@@ -171,8 +193,21 @@ function createSellAnnouncementScene(bot) {
 
         message += '\nAggiungi altra fascia o scrivi `fine` per terminare:';
 
-        await ctx.reply(message, { parse_mode: 'Markdown' });
+        await ctx.reply(message, { 
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '✅ Termina configurazione', callback_data: 'finish_tiers' }],
+                    [{ text: '❌ Annulla', callback_data: 'cancel' }]
+                ]
+            }
+        });
     }
+
+    scene.action('finish_tiers', async (ctx) => {
+        await ctx.answerCbQuery();
+        await finishGraduatedTiers(ctx);
+    });
 
     async function finishGraduatedTiers(ctx) {
         const tiers = ctx.session.announcementData.pricingTiers;
@@ -197,7 +232,8 @@ function createSellAnnouncementScene(bot) {
                 reply_markup: {
                     inline_keyboard: [
                         [{ text: '✅ Sì, imposta minimo', callback_data: 'set_minimum' }],
-                        [{ text: '❌ No, continua', callback_data: 'skip_minimum' }]
+                        [{ text: '❌ No, continua', callback_data: 'skip_minimum' }],
+                        [{ text: '🔙 Annulla', callback_data: 'cancel' }]
                     ]
                 }
             }
@@ -236,7 +272,14 @@ function createSellAnnouncementScene(bot) {
             '⚡ **TIPO DI CORRENTE**\n\nChe tipo di corrente offri?',
             {
                 parse_mode: 'Markdown',
-                reply_markup: Keyboards.getCurrentTypeKeyboard().reply_markup
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🔌 Solo DC', callback_data: 'current_dc_only' }],
+                        [{ text: '⚡ Solo AC', callback_data: 'current_ac_only' }],
+                        [{ text: '🔋 Entrambi DC e AC', callback_data: 'current_both' }],
+                        [{ text: '❌ Annulla', callback_data: 'cancel' }]
+                    ]
+                }
             }
         );
     }
@@ -247,8 +290,14 @@ function createSellAnnouncementScene(bot) {
         ctx.session.announcementData.currentType = currentType;
         
         await ctx.editMessageText(
-            '📍 **ZONE SERVITE**\n\nIn quali zone offri il servizio?\n\n' +
-            'Inserisci le zone separate da virgola (es: Centro, Stazione, Periferia):',
+            '📍 **ZONE SERVITE**\n\n' +
+            'In quali zone offri il servizio?\n\n' +
+            '💡 **Suggerimenti:**\n' +
+            '• "Italia" (tutto il paese)\n' +
+            '• "Lombardia" (intera regione)\n' +
+            '• "Milano e provincia"\n' +
+            '• "Centro Milano, Navigli, Porta Romana"\n\n' +
+            'Inserisci le zone:',
             { parse_mode: 'Markdown' }
         );
         ctx.session.step = 'zones';
@@ -261,7 +310,13 @@ function createSellAnnouncementScene(bot) {
             '🌐 **RETI DI RICARICA**\n\nQuale rete di ricarica usi?',
             {
                 parse_mode: 'Markdown',
-                reply_markup: Keyboards.getNetworksKeyboard().reply_markup
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🌐 Tutte le reti', callback_data: 'networks_all' }],
+                        [{ text: '📝 Specifica reti', callback_data: 'networks_specific' }],
+                        [{ text: '❌ Annulla', callback_data: 'cancel' }]
+                    ]
+                }
             }
         );
     }
@@ -289,20 +344,51 @@ function createSellAnnouncementScene(bot) {
 
     async function askLocation(ctx) {
         await ctx.reply(
-            '📍 **POSIZIONE PRECISA**\n\n' +
-            'Inserisci l\'indirizzo esatto dove si trova la colonnina:',
-            { parse_mode: 'Markdown' }
+            '📍 **POSIZIONE COLONNINA**\n\n' +
+            'Puoi:\n' +
+            '1️⃣ Inviare la posizione GPS usando il pulsante 📎\n' +
+            '2️⃣ Scrivere l\'indirizzo completo\n\n' +
+            'Scegli il metodo che preferisci:',
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    keyboard: [
+                        [{ text: '📍 Invia posizione GPS', request_location: true }],
+                        ['✏️ Scrivi indirizzo']
+                    ],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            }
         );
         ctx.session.step = 'location';
     }
 
+    scene.hears('✏️ Scrivi indirizzo', async (ctx) => {
+        if (ctx.session.step === 'location') {
+            await ctx.reply(
+                '✏️ **INSERISCI INDIRIZZO**\n\n' +
+                'Scrivi l\'indirizzo completo della colonnina\n' +
+                'Esempio: Via Roma 123, Milano',
+                { 
+                    parse_mode: 'Markdown',
+                    reply_markup: { remove_keyboard: true }
+                }
+            );
+        }
+    });
+
     async function handleLocation(ctx, location) {
-        if (location.length < 5 || location.length > 200) {
+        if (ctx.session.step === 'location_description') {
+            // Aggiungi descrizione alla posizione GPS
+            ctx.session.announcementData.location = `${ctx.session.announcementData.location} - ${location}`;
+            ctx.session.step = null;
+        } else if (location.length < 5 || location.length > 200) {
             await ctx.reply('❌ La posizione deve essere tra 5 e 200 caratteri. Riprova:');
             return;
+        } else {
+            ctx.session.announcementData.location = location;
         }
-        
-        ctx.session.announcementData.location = location;
         
         await ctx.reply(
             '📝 **DESCRIZIONE** (opzionale)\n\n' +
@@ -312,7 +398,8 @@ function createSellAnnouncementScene(bot) {
                 reply_markup: {
                     inline_keyboard: [
                         [{ text: '✅ Sì, aggiungi', callback_data: 'add_description' }],
-                        [{ text: '❌ No, continua', callback_data: 'skip_description' }]
+                        [{ text: '❌ No, continua', callback_data: 'skip_description' }],
+                        [{ text: '🔙 Annulla', callback_data: 'cancel' }]
                     ]
                 }
             }
@@ -351,7 +438,8 @@ function createSellAnnouncementScene(bot) {
                 reply_markup: {
                     inline_keyboard: [
                         [{ text: '🕐 Sempre disponibile', callback_data: 'availability_always' }],
-                        [{ text: '⏰ Specifica orari', callback_data: 'availability_custom' }]
+                        [{ text: '⏰ Specifica orari', callback_data: 'availability_custom' }],
+                        [{ text: '❌ Annulla', callback_data: 'cancel' }]
                     ]
                 }
             }
@@ -436,7 +524,13 @@ function createSellAnnouncementScene(bot) {
 
         await ctx.reply(preview, {
             parse_mode: 'Markdown',
-            reply_markup: Keyboards.getAnnouncementPreviewKeyboard().reply_markup
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '✅ Pubblica annuncio', callback_data: 'publish_announcement' }],
+                    [{ text: '✏️ Modifica', callback_data: 'edit_announcement' }],
+                    [{ text: '❌ Annulla', callback_data: 'cancel' }]
+                ]
+            }
         });
     }
 
