@@ -26,7 +26,7 @@ const { createTransactionScene } = require('./scenes/TransactionScene');
 const Keyboards = require('./utils/Keyboards');
 const Messages = require('./utils/Messages');
 const { TransactionCache } = require('./utils/TransactionCache');
-const ChatCleaner = require('./utils/ChatCleaner'); // NUOVO
+const ChatCleaner = require('./utils/ChatCleaner');
 
 class KwhBot {
     constructor() {
@@ -54,7 +54,7 @@ class KwhBot {
         // Cache per ID transazioni
         this.transactionCache = new TransactionCache();
         
-        // NUOVO: Chat cleaner per mantenere chat pulite
+        // Chat cleaner per mantenere chat pulite
         this.chatCleaner = null;
         
         this.init();
@@ -70,7 +70,7 @@ class KwhBot {
             // Initialize services
             await this.initializeServices();
             
-            // NUOVO: Initialize chat cleaner
+            // Initialize chat cleaner
             this.chatCleaner = new ChatCleaner(this);
             
             // Initialize handlers
@@ -82,7 +82,7 @@ class KwhBot {
             // Setup webhook and server
             await this.setupWebhook();
             
-            // NUOVO: Setup cleanup jobs
+            // Setup cleanup jobs
             this.setupCleanupJobs();
             
             console.log('✅ Bot KWH Sharing inizializzato con successo!');
@@ -114,11 +114,8 @@ class KwhBot {
     }
 
     async setupBot() {
-        // Setup middleware
+        // Setup middleware (ORDINE IMPORTANTE!)
         this.setupMiddleware();
-        
-        // Setup scenes
-        this.setupScenes();
         
         // Setup handlers
         this.commandHandler.setupCommands();
@@ -142,18 +139,24 @@ class KwhBot {
     }
 
     setupMiddleware() {
-        // Session middleware
+        // IMPORTANTE: Session middleware DEVE venire PRIMA delle scene
         this.bot.use(session({
             defaultSession: () => ({}),
             ttl: 6 * 60 * 60 // 6 hours
         }));
         
-        // Scene middleware
+        // Crea le scene passando 'this' (il bot completo)
+        const sellAnnouncementScene = createSellAnnouncementScene(this);
+        const contactSellerScene = createContactSellerScene(this);
+        const transactionScene = createTransactionScene(this);
+        
+        // Scene middleware - Stage DOPO session
         const stage = new Scenes.Stage([
-            createSellAnnouncementScene(this),
-            createContactSellerScene(this),
-            createTransactionScene(this)
+            sellAnnouncementScene,
+            contactSellerScene,
+            transactionScene
         ]);
+        
         this.bot.use(stage.middleware());
         
         // Logging middleware
@@ -166,14 +169,11 @@ class KwhBot {
         
         // User verification middleware
         this.bot.use(async (ctx, next) => {
-            if (ctx.chat.type === 'private') {
+            if (ctx.chat?.type === 'private') {
                 const userId = ctx.from.id;
-                const isGroupMember = await this.userService.isUserInGroup(userId, this.groupId);
                 
-                if (!isGroupMember && userId != this.adminUserId) {
-                    await ctx.reply(Messages.NOT_GROUP_MEMBER);
-                    return;
-                }
+                // Per ora tutti possono usare il bot
+                // In futuro si può aggiungere verifica membership gruppo
                 
                 // Register/update user
                 await this.userService.upsertUser({
@@ -186,7 +186,7 @@ class KwhBot {
             }
             
             // Delete user messages in the topic (keep only announcements)
-            if (ctx.chat.id == this.groupId && ctx.message?.message_thread_id == this.topicId) {
+            if (ctx.chat?.id == this.groupId && ctx.message?.message_thread_id == this.topicId) {
                 if (!ctx.message.text?.startsWith('🔋 Vendita kWh sharing')) {
                     try {
                         await ctx.deleteMessage();
@@ -201,16 +201,12 @@ class KwhBot {
         });
     }
 
-    setupScenes() {
-        // Scenes are created in separate files and passed to stage in setupMiddleware
-    }
-
     async setupBotCommands() {
         try {
             const commands = [
                 { command: 'start', description: 'Avvia il bot e mostra il menu principale' },
+                { command: 'menu', description: 'Mostra il menu principale' },
                 { command: 'help', description: 'Mostra la guida completa del bot' },
-                { command: 'tx', description: 'Accedi a una transazione specifica (es: /tx ID)' },
                 { command: 'pagamenti', description: 'Visualizza pagamenti in sospeso' },
                 { command: 'admin', description: 'Dashboard amministratore (solo admin)' },
                 { command: 'stats', description: 'Mostra statistiche generali (solo admin)' }
@@ -228,7 +224,6 @@ class KwhBot {
         await this.webhookHandler.setupWebhook();
     }
 
-    // NUOVO: Setup cleanup jobs
     setupCleanupJobs() {
         // Pulizia messaggi vecchi ogni ora
         cron.schedule('0 * * * *', () => {
@@ -333,13 +328,14 @@ class KwhBot {
         details += `🔌 Connettore: ${transaction.connector}\n\n`;
         
         if (announcement) {
-            details += `💰 Prezzo: ${announcement.price}€/KWH\n`;
+            details += `💰 Prezzo: ${announcement.price || announcement.basePrice}€/KWH\n`;
         }
         
         if (transaction.declaredKwh) {
             details += `⚡ KWH dichiarati: ${transaction.declaredKwh}\n`;
             if (announcement) {
-                const amount = (transaction.declaredKwh * announcement.price).toFixed(2);
+                const price = announcement.price || announcement.basePrice;
+                const amount = (transaction.declaredKwh * price).toFixed(2);
                 details += `💰 Importo totale: €${amount}\n`;
             }
         }
