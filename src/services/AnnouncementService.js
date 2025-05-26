@@ -130,6 +130,26 @@ class AnnouncementService {
         }
     }
 
+    // NUOVO: Metodo per aggiornare un annuncio
+    async updateAnnouncement(announcementId, updateData) {
+        try {
+            const result = await this.collection.updateOne(
+                { announcementId: announcementId },
+                { 
+                    $set: {
+                        ...updateData,
+                        updatedAt: new Date()
+                    }
+                }
+            );
+
+            return result.modifiedCount > 0;
+        } catch (error) {
+            console.error('Errore nell\'aggiornamento dell\'annuncio:', error);
+            throw error;
+        }
+    }
+
     async getAnnouncementStats() {
         try {
             const stats = await this.collection.aggregate([
@@ -261,6 +281,59 @@ class AnnouncementService {
         
         // ID copiabile
         message += `\n🆔 **ID:** \`${announcement.announcementId}\``;
+        
+        return message;
+    }
+
+    // NUOVO METODO: Formatta annuncio per pubblicazione nel gruppo con posizione copiabile
+    formatAnnouncementForGroup(announcement, userStats) {
+        let message = `🔋 **Vendita kWh sharing**\n\n`;
+        
+        const user = announcement.userId;
+        const username = user.username || user.firstName || 'Utente';
+        message += `👤 Venditore: @${username}`;
+        
+        // Badge venditore
+        if (userStats && userStats.totalFeedback >= 5) {
+            if (userStats.positivePercentage >= 95) {
+                message += ` 🌟 TOP`;
+            } else if (userStats.positivePercentage >= 90) {
+                message += ` ✅ AFFIDABILE`;
+            }
+        }
+        
+        message += '\n';
+        
+        // IMPORTANTE: Posizione copiabile con backtick
+        message += `📍 Posizione: \`${announcement.location}\`\n`;
+        
+        // Pricing compatto
+        if (announcement.pricingType === 'fixed') {
+            message += `💰 Prezzo: ${announcement.basePrice}€/KWH`;
+            if (announcement.minimumKwh) {
+                message += ` (min ${announcement.minimumKwh} KWH)`;
+            }
+        } else {
+            message += `💰 Prezzi: `;
+            const tiers = announcement.pricingTiers;
+            if (tiers.length > 0) {
+                message += `da ${tiers[0].price}€/KWH`;
+                if (tiers.length > 1) {
+                    const lastTier = tiers[tiers.length - 1];
+                    message += ` a ${lastTier.price}€/KWH`;
+                }
+            }
+        }
+        
+        message += '\n';
+        
+        // Disponibilità
+        if (announcement.availability && announcement.availability !== 'Sempre disponibile') {
+            message += `⏰ ${announcement.availability}\n`;
+        }
+        
+        // ID copiabile
+        message += `\n🆔 ID: \`${announcement.announcementId}\``;
         
         return message;
     }
