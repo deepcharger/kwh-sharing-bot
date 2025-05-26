@@ -102,7 +102,7 @@ function createContactSellerScene(bot) {
         for (const kwh of examples) {
             const price = announcement.pricingType === 'fixed' 
                 ? (Math.max(kwh, announcement.minimumKwh || 0) * (announcement.basePrice || announcement.price))
-                : this.calculateGraduatedPrice(announcement, kwh);
+                : calculateGraduatedPrice(announcement, kwh);
             message += `• ${kwh} KWH → €${price.toFixed(2)}\n`;
         }
         
@@ -121,7 +121,8 @@ function createContactSellerScene(bot) {
         });
     });
 
-    scene.calculateGraduatedPrice = function(announcement, kwh) {
+    // Funzione helper per calcolare il prezzo graduato
+    function calculateGraduatedPrice(announcement, kwh) {
         const finalKwh = Math.max(kwh, announcement.minimumKwh || 0);
         
         if (!announcement.pricingTiers || announcement.pricingTiers.length === 0) {
@@ -138,7 +139,7 @@ function createContactSellerScene(bot) {
         }
         
         return finalKwh * applicableTier.price;
-    };
+    }
 
     scene.action('confirm_contact', async (ctx) => {
         await ctx.answerCbQuery();
@@ -170,7 +171,7 @@ function createContactSellerScene(bot) {
             case 'date':
                 data.scheduledDate = text;
                 data.step = 'brand';
-                await ctx.reply('🏢 **MARCA COLONNINA?**\n\nEsempio: Enel X, Be Charge, Ionity...');
+                await ctx.reply('🏢 **MARCA COLONNINA?**\n\nEsempio: Enel X, Be Charge, Ionity...', { parse_mode: 'Markdown' });
                 break;
 
             case 'brand':
@@ -192,18 +193,19 @@ function createContactSellerScene(bot) {
             case 'location':
                 data.location = text;
                 data.step = 'serial';
-                await ctx.reply('🔢 **NUMERO SERIALE COLONNINA?**');
+                await ctx.reply('🔢 **NUMERO SERIALE COLONNINA?**', { parse_mode: 'Markdown' });
                 break;
 
             case 'serial':
                 data.serialNumber = text;
                 data.step = 'connector';
-                await ctx.reply('🔌 **TIPO CONNETTORE?**\n\nEsempio: Type 2, CCS, CHAdeMO...');
+                await ctx.reply('🔌 **TIPO CONNETTORE?**\n\nEsempio: Type 2, CCS, CHAdeMO...', { parse_mode: 'Markdown' });
                 break;
 
             case 'connector':
                 data.connector = text;
-                await this.createTransaction(ctx, bot);
+                // FIX: Chiama la funzione createTransaction direttamente, non come metodo
+                await createTransaction(ctx, bot);
                 break;
         }
     });
@@ -214,10 +216,11 @@ function createContactSellerScene(bot) {
         ctx.session.contactData.currentType = currentType;
         ctx.session.contactData.step = 'location';
         
-        await ctx.editMessageText('📍 **POSIZIONE ESATTA COLONNINA?**\n\nInserisci indirizzo o coordinate GPS.');
+        await ctx.editMessageText('📍 **POSIZIONE ESATTA COLONNINA?**\n\nInserisci indirizzo o coordinate GPS.', { parse_mode: 'Markdown' });
     });
 
-    scene.createTransaction = async function(ctx, bot) {
+    // FIX: Definisci createTransaction come funzione normale, non come metodo della scene
+    async function createTransaction(ctx, bot) {
         try {
             const data = ctx.session.contactData;
             
@@ -290,7 +293,7 @@ function createContactSellerScene(bot) {
         }
 
         return ctx.scene.leave();
-    };
+    }
 
     return scene;
 }
