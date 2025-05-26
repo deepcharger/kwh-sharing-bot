@@ -230,7 +230,7 @@ class AnnouncementService {
         return errors;
     }
 
-    // Metodo helper per formattare annunci
+    // Metodo helper per formattare annunci con campi copiabili
     async formatAnnouncementMessage(announcement, userStats) {
         let message = `🔋 **OFFERTA ENERGIA**\n\n`;
         
@@ -247,7 +247,8 @@ class AnnouncementService {
             }
         }
         
-        message += `\n📍 **Posizione:** ${announcement.location}\n`;
+        // Posizione copiabile
+        message += `\n📍 **Posizione:** \`${announcement.location}\`\n`;
         message += `📝 **Descrizione:** ${announcement.description}\n`;
         message += `⏰ **Disponibilità:** ${announcement.availability}\n`;
         
@@ -257,6 +258,9 @@ class AnnouncementService {
         if (announcement.contactInfo) {
             message += `📞 **Contatti:** ${announcement.contactInfo}\n`;
         }
+        
+        // ID copiabile
+        message += `\n🆔 **ID:** \`${announcement.announcementId}\``;
         
         return message;
     }
