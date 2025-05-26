@@ -281,8 +281,7 @@ function createSellAnnouncementScene(bot) {
 
     async function handleZones(ctx, zones) {
         ctx.session.announcementData.zones = zones;
-        // Impostiamo una location generica basata sulle zone
-        ctx.session.announcementData.location = zones; // Useremo le zone come location
+        ctx.session.announcementData.location = zones; // Useremo le zone come location generica
         
         await ctx.reply(
             '🌐 **RETI DI RICARICA**\n\nQuale rete di ricarica usi?',
