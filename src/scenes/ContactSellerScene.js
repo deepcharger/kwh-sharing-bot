@@ -1,12 +1,10 @@
 const { Scenes } = require('telegraf');
 const Messages = require('../utils/Messages');
 const Keyboards = require('../utils/Keyboards');
-const moment = require('moment');
 
 function createContactSellerScene(bot) {
     const scene = new Scenes.BaseScene('contactSellerScene');
 
-    // Enter scene
     scene.enter(async (ctx) => {
         const announcementId = ctx.session.announcementId;
         
@@ -15,7 +13,6 @@ function createContactSellerScene(bot) {
             return ctx.scene.leave();
         }
 
-        // Get announcement details
         const announcement = await bot.announcementService.getAnnouncement(announcementId);
         
         if (!announcement) {
@@ -23,151 +20,116 @@ function createContactSellerScene(bot) {
             return ctx.scene.leave();
         }
 
-        // Check if trying to contact own announcement
         if (announcement.userId === ctx.from.id) {
             await ctx.reply('❌ Non puoi acquistare dal tuo stesso annuncio!', Keyboards.MAIN_MENU);
             return ctx.scene.leave();
         }
 
-        // Get seller stats
-        const userStats = await bot.userService.getUserStats(announcement.userId);
-        
-        // Get seller info for username
-        const sellerInfo = await bot.userService.getUser(announcement.userId);
-        announcement.username = sellerInfo?.username || 'utente';
-        
-        // Format current type correctly
-        const currentTypeTexts = {
-            'dc_only': 'SOLO DC',
-            'ac_only': 'SOLO AC',
-            'both': 'DC E AC',
-            'dc_min_30': 'SOLO DC E MINIMO 30 KW'
-        };
-        
-        announcement.currentTypeText = currentTypeTexts[announcement.currentType] || announcement.currentType || 'Non specificato';
-        
-        // Show announcement summary
-        const summaryText = Messages.formatContactSummary(
-            announcement,
-            userStats
-        );
-
-        ctx.session.purchaseData = {
+        ctx.session.contactData = {
             announcementId,
             sellerId: announcement.userId,
-            announcement
+            step: 'confirm'
         };
 
-        await ctx.reply(summaryText, {
+        let message = `🛒 **CONTATTA VENDITORE**\n\n`;
+        message += `📍 Posizione: ${announcement.location}\n`;
+        message += `${bot.announcementService.formatPricing(announcement)}\n\n`;
+        message += `Vuoi procedere con la richiesta di acquisto?`;
+
+        await ctx.reply(message, {
             parse_mode: 'Markdown',
-            ...Keyboards.getConfirmPurchaseKeyboard()
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Sì, procedo', callback_data: 'confirm_contact' },
+                        { text: '❌ Annulla', callback_data: 'cancel_contact' }
+                    ]
+                ]
+            }
         });
     });
 
-    // Confirm purchase action
-    scene.action('confirm_purchase', async (ctx) => {
+    scene.action('confirm_contact', async (ctx) => {
         await ctx.answerCbQuery();
-        await ctx.editMessageText(Messages.BUY_DATETIME, { reply_markup: undefined });
+        await ctx.editMessageText(
+            '📅 **QUANDO TI SERVE LA RICARICA?**\n\n' +
+            'Inserisci data e ora nel formato:\n' +
+            '`GG/MM/AAAA HH:MM`\n\n' +
+            'Esempio: `25/12/2024 15:30`',
+            { parse_mode: 'Markdown' }
+        );
+        ctx.session.contactData.step = 'date';
     });
 
-    scene.action('cancel_purchase', async (ctx) => {
+    scene.action('cancel_contact', async (ctx) => {
         await ctx.answerCbQuery();
-        await ctx.editMessageText('❌ Acquisto annullato.', { reply_markup: undefined });
-        setTimeout(() => {
-            ctx.deleteMessage().catch(() => {});
-            ctx.reply('Usa il menu per altre operazioni:', Keyboards.MAIN_MENU);
-        }, 1000);
+        await ctx.editMessageText('❌ Richiesta annullata.');
         return ctx.scene.leave();
     });
 
-    // Handle current type selection (AC/DC)
-    scene.action(/^select_(ac|dc)$/, async (ctx) => {
-        const currentType = ctx.match[1].toUpperCase();
-        ctx.session.purchaseData.currentType = currentType;
-        
-        await ctx.answerCbQuery();
-        await ctx.editMessageText(Messages.BUY_LOCATION, { reply_markup: undefined });
-    });
-
-    // Handle location (both text and location)
-    scene.on('location', async (ctx) => {
-        const { latitude, longitude } = ctx.message.location;
-        ctx.session.purchaseData.location = `GPS: ${latitude}, ${longitude}`;
-        await ctx.reply(Messages.BUY_SERIAL, Keyboards.CANCEL_ONLY);
-    });
-
-    // Handle text location
     scene.on('text', async (ctx) => {
         const text = ctx.message.text;
-        const data = ctx.session.purchaseData;
+        const data = ctx.session.contactData;
 
-        if (text === '❌ Annulla') {
-            await ctx.reply('❌ Acquisto annullato.', Keyboards.MAIN_MENU);
+        if (!data) {
             return ctx.scene.leave();
         }
 
-        // Step 1: Date and time
-        if (!data.scheduledDate) {
-            const dateRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})$/;
-            const match = text.match(dateRegex);
-            
-            if (!match) {
-                await ctx.reply(Messages.ERROR_MESSAGES.INVALID_DATE);
-                return;
-            }
+        switch (data.step) {
+            case 'date':
+                data.scheduledDate = text;
+                data.step = 'brand';
+                await ctx.reply('🏢 **MARCA COLONNINA?**\n\nEsempio: Enel X, Be Charge, Ionity...');
+                break;
 
-            const [, day, month, year, hour, minute] = match;
-            const scheduledDate = moment(`${year}-${month}-${day} ${hour}:${minute}`, 'YYYY-MM-DD HH:mm');
-            
-            if (!scheduledDate.isValid() || scheduledDate.isBefore(moment())) {
-                await ctx.reply('❌ Data non valida o nel passato. Inserisci una data futura.');
-                return;
-            }
+            case 'brand':
+                data.brand = text;
+                data.step = 'current';
+                await ctx.reply(
+                    '⚡ **TIPO DI CORRENTE?**',
+                    {
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '⚡ AC', callback_data: 'current_ac' }],
+                                [{ text: '🔌 DC', callback_data: 'current_dc' }]
+                            ]
+                        }
+                    }
+                );
+                break;
 
-            data.scheduledDate = scheduledDate.format('DD/MM/YYYY HH:mm');
-            await ctx.reply(Messages.BUY_BRAND, Keyboards.CANCEL_ONLY);
-            return;
-        }
+            case 'location':
+                data.location = text;
+                data.step = 'serial';
+                await ctx.reply('🔢 **NUMERO SERIALE COLONNINA?**');
+                break;
 
-        // Step 2: Brand
-        if (!data.brand) {
-            data.brand = text.trim().toUpperCase();
-            await ctx.reply('⚡ **Che tipo di corrente ti serve?**\n\nSeleziona il tipo di ricarica:', {
-                parse_mode: 'Markdown',
-                ...Keyboards.getCurrentTypeSelectionKeyboard()
-            });
-            return;
-        }
+            case 'serial':
+                data.serialNumber = text;
+                data.step = 'connector';
+                await ctx.reply('🔌 **TIPO CONNETTORE?**\n\nEsempio: Type 2, CCS, CHAdeMO...');
+                break;
 
-        // Step 3: Location (if we're waiting for location and got text instead)
-        if (data.currentType && !data.location) {
-            data.location = text.trim();
-            await ctx.reply(Messages.BUY_SERIAL, Keyboards.CANCEL_ONLY);
-            return;
-        }
-
-        // Step 4: Serial number
-        if (!data.serialNumber) {
-            data.serialNumber = text.trim();
-            await ctx.reply(Messages.BUY_CONNECTOR, Keyboards.CANCEL_ONLY);
-            return;
-        }
-
-        // Step 5: Connector type (final step)
-        if (!data.connector) {
-            data.connector = text.trim().toUpperCase();
-            
-            // All data collected, create transaction and notify seller
-            await createTransactionAndNotifySeller(ctx, bot);
-            return;
+            case 'connector':
+                data.connector = text;
+                await this.createTransaction(ctx, bot);
+                break;
         }
     });
 
-    async function createTransactionAndNotifySeller(ctx, bot) {
+    scene.action(/^current_(.+)$/, async (ctx) => {
+        await ctx.answerCbQuery();
+        const currentType = ctx.match[1].toUpperCase();
+        ctx.session.contactData.currentType = currentType;
+        ctx.session.contactData.step = 'location';
+        
+        await ctx.editMessageText('📍 **POSIZIONE ESATTA COLONNINA?**\n\nInserisci indirizzo o coordinate GPS.');
+    });
+
+    scene.createTransaction = async function(ctx, bot) {
         try {
-            const data = ctx.session.purchaseData;
+            const data = ctx.session.contactData;
             
-            // Create transaction
             const transaction = await bot.transactionService.createTransaction(
                 data.announcementId,
                 data.sellerId,
@@ -182,66 +144,56 @@ function createContactSellerScene(bot) {
                 }
             );
 
-            // Notify seller
-            const requestText = Messages.formatPurchaseRequest(
-                {
-                    ...data,
-                    buyerUsername: ctx.from.username || ctx.from.first_name
-                },
-                data.announcement
-            );
-
             try {
+                const buyer = await bot.userService.getUser(ctx.from.id);
+                const announcement = await bot.announcementService.getAnnouncement(data.announcementId);
+                
+                let notifyText = `📥 **NUOVA RICHIESTA DI ACQUISTO**\n\n`;
+                notifyText += `👤 Da: @${buyer?.username || buyer?.firstName || 'utente'}\n`;
+                notifyText += `📅 Data/ora: ${data.scheduledDate}\n`;
+                notifyText += `🏢 Brand: ${data.brand}\n`;
+                notifyText += `⚡ Tipo: ${data.currentType}\n`;
+                notifyText += `📍 Posizione: ${data.location}\n`;
+                notifyText += `🔌 Connettore: ${data.connector}\n\n`;
+                notifyText += `🔍 ID Transazione: \`${transaction.transactionId}\``;
+
                 await ctx.telegram.sendMessage(
                     data.sellerId,
-                    requestText + `\n\n🔍 ID Transazione: \`${transaction.transactionId}\``,
+                    notifyText,
                     {
                         parse_mode: 'Markdown',
-                        ...Keyboards.getSellerConfirmationKeyboard()
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '✅ Accetto', callback_data: `accept_request_${transaction.transactionId}` },
+                                    { text: '❌ Rifiuto', callback_data: `reject_request_${transaction.transactionId}` }
+                                ]
+                            ]
+                        }
                     }
                 );
-
             } catch (error) {
                 console.error('Error notifying seller:', error);
-                // If we can't notify seller, still proceed but inform buyer
-                await ctx.reply('⚠️ Richiesta creata, ma il venditore potrebbe non ricevere notifiche. Contattalo direttamente se necessario.');
             }
 
-            // Confirm to buyer
             await ctx.reply(
-                `✅ *Richiesta inviata al venditore!*\n\n` +
+                `✅ **RICHIESTA INVIATA!**\n\n` +
                 `🆔 ID Transazione: \`${transaction.transactionId}\`\n\n` +
                 `Il venditore riceverà una notifica e dovrà confermare la tua richiesta.\n` +
                 `Ti aggiorneremo sullo stato della transazione.`,
                 {
                     parse_mode: 'Markdown',
-                    ...Keyboards.MAIN_MENU
+                    reply_markup: Keyboards.MAIN_MENU.reply_markup
                 }
             );
 
-            // Store transaction ID for future reference
-            ctx.session.currentTransactionId = transaction.transactionId;
-
         } catch (error) {
             console.error('Error creating transaction:', error);
-            await ctx.reply(Messages.ERROR_MESSAGES.GENERIC_ERROR, Keyboards.MAIN_MENU);
+            await ctx.reply('❌ Errore nella creazione della richiesta. Riprova.', Keyboards.MAIN_MENU);
         }
 
         return ctx.scene.leave();
-    }
-
-    // Handle unexpected messages
-    scene.on('message', async (ctx) => {
-        if (ctx.message.photo) {
-            await ctx.reply('❌ Non inviare foto durante la configurazione dell\'acquisto.');
-            return;
-        }
-        
-        if (ctx.message.document) {
-            await ctx.reply('❌ Non inviare documenti durante la configurazione dell\'acquisto.');
-            return;
-        }
-    });
+    };
 
     return scene;
 }
