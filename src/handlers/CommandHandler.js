@@ -7,7 +7,7 @@ class CommandHandler {
     }
 
     setupCommands() {
-        // Start command
+        // Start command con gestione deep link per contatto venditore
         this.bot.bot.start(async (ctx) => {
             const userId = ctx.from.id;
             
@@ -19,6 +19,34 @@ class CommandHandler {
                 lastName: ctx.from.last_name
             });
             
+            // Controlla se c'è un parametro di deep link
+            const startPayload = ctx.message.text.split(' ')[1];
+            
+            if (startPayload && startPayload.startsWith('contact_')) {
+                // Estrai l'ID dell'annuncio
+                const announcementId = startPayload.replace('contact_', '');
+                
+                // Recupera l'annuncio
+                const announcement = await this.bot.announcementService.getAnnouncement(announcementId);
+                
+                if (!announcement || !announcement.active) {
+                    await ctx.reply('❌ Annuncio non trovato o non più disponibile.', Keyboards.MAIN_MENU);
+                    return;
+                }
+                
+                // Verifica che non sia il proprio annuncio
+                if (announcement.userId === userId) {
+                    await ctx.reply('❌ Non puoi acquistare dal tuo stesso annuncio!', Keyboards.MAIN_MENU);
+                    return;
+                }
+                
+                // Salva l'annuncio nella sessione e entra nella scene di contatto
+                ctx.session.announcementId = announcementId;
+                await ctx.scene.enter('contactSellerScene');
+                return;
+            }
+            
+            // Comportamento normale se non c'è deep link
             // Pulisci eventuali messaggi precedenti
             await this.bot.chatCleaner.cleanupUserMessages(ctx, ['temporary', 'navigation']);
             
