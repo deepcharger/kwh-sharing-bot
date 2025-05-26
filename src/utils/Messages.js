@@ -6,10 +6,10 @@ class Messages {
 Qui puoi comprare e vendere energia per auto elettriche in modo sicuro e conveniente.
 
 🌟 **Funzionalità principali:**
-• Pubblica offerte di ricarica
-• Cerca le migliori tariffe
-• Sistema di pagamento sicuro
-• Valutazioni e recensioni
+- Pubblica offerte di ricarica
+- Cerca le migliori tariffe
+- Sistema di pagamento sicuro
+- Valutazioni e recensioni
 
 Usa i pulsanti per iniziare!`;
     }
@@ -20,12 +20,29 @@ Usa i pulsanti per iniziare!`;
 Guadagna condividendo l'accesso alle tue ricariche!
 
 💰 **Vantaggi:**
-• Imposta prezzi fissi o graduati
-• Controllo totale sulle condizioni
-• Pagamenti diretti
-• Sistema di recensioni
+- Imposta prezzi fissi o graduati
+- Controllo totale sulle condizioni
+- Pagamenti diretti
+- Sistema di recensioni
 
 Pronto a creare il tuo primo annuncio?`;
+    }
+
+    static get HELP_TEXT() {
+        return `❓ **GUIDA COMPLETA**
+
+📋 **Come funziona:**
+- Venditori pubblicano offerte di ricarica
+- Acquirenti cercano e prenotano
+- Il sistema gestisce la transazione
+- Feedback reciproco finale
+
+💡 **Suggerimenti:**
+- Usa prezzi competitivi
+- Rispondi velocemente
+- Mantieni alta la reputazione
+
+Hai bisogno di aiuto specifico?`;
     }
 
     // Messaggi per prezzi graduati
@@ -35,14 +52,14 @@ Pronto a creare il tuo primo annuncio?`;
 I prezzi graduati permettono di offrire sconti per quantità maggiori.
 
 **Esempio:**
-• 0-30 KWH: TUTTO a 0,45€/KWH
-• 31-60 KWH: TUTTO a 0,40€/KWH  
-• Oltre 60 KWH: TUTTO a 0,35€/KWH
+- 0-30 KWH: TUTTO a 0,45€/KWH
+- 31-60 KWH: TUTTO a 0,40€/KWH  
+- Oltre 60 KWH: TUTTO a 0,35€/KWH
 
 **Calcoli:**
-• Chi ricarica 25 KWH → 25 × 0,45€ = €11,25
-• Chi ricarica 45 KWH → 45 × 0,40€ = €18,00
-• Chi ricarica 80 KWH → 80 × 0,35€ = €28,00
+- Chi ricarica 25 KWH → 25 × 0,45€ = €11,25
+- Chi ricarica 45 KWH → 45 × 0,40€ = €18,00
+- Chi ricarica 80 KWH → 80 × 0,35€ = €28,00
 
 Il prezzo si applica a TUTTA la quantità, non solo alla fascia.`;
     }
@@ -53,16 +70,16 @@ Il prezzo si applica a TUTTA la quantità, non solo alla fascia.`;
 Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
 
 **Esempio con minimo 15 KWH:**
-• Chi ricarica 8 KWH → paga per 15 KWH
-• Chi ricarica 20 KWH → paga per 20 KWH
+- Chi ricarica 8 KWH → paga per 15 KWH
+- Chi ricarica 20 KWH → paga per 20 KWH
 
 È utile per:
-• Coprire costi fissi di attivazione
-• Garantire un compenso minimo
-• Scoraggiare ricariche troppo piccole`;
+- Coprire costi fissi di attivazione
+- Garantire un compenso minimo
+- Scoraggiare ricariche troppo piccole`;
     }
 
-    // Template per annunci
+    // Template per annunci con campi copiabili
     static formatAnnouncementDisplay(announcement, userStats) {
         let message = `🔋 **OFFERTA ENERGIA**\n\n`;
         
@@ -71,20 +88,21 @@ Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
         message += `👤 **Venditore:** @${username}\n`;
         
         // Badge venditore se disponibile
-        if (userStats && userStats.rating.totalRatings >= 5) {
-            const rating = userStats.rating.avgRating;
-            if (rating >= 4.5) {
-                message += `⭐ **VENDITORE TOP** (${rating.toFixed(1)}/5)\n`;
-            } else if (rating >= 4.0) {
-                message += `✅ **VENDITORE AFFIDABILE** (${rating.toFixed(1)}/5)\n`;
+        if (userStats && userStats.totalFeedback >= 5) {
+            const rating = userStats.avgRating;
+            if (userStats.positivePercentage >= 95) {
+                message += `🌟 **VENDITORE TOP** (${userStats.positivePercentage}% positivi)\n`;
+            } else if (userStats.positivePercentage >= 90) {
+                message += `✅ **VENDITORE AFFIDABILE** (${userStats.positivePercentage}% positivi)\n`;
             }
         }
         
-        message += `\n📍 **Posizione:** ${announcement.location}\n`;
+        // Campi principali con posizione copiabile
+        message += `\n📍 **Posizione:** \`${announcement.location}\`\n`;
         message += `📝 **Descrizione:** ${announcement.description}\n`;
         message += `⏰ **Disponibilità:** ${announcement.availability}\n`;
         
-        // Pricing - NUOVO FORMATO
+        // Pricing
         message += `\n${this.formatPricingDisplay(announcement)}\n`;
         
         if (announcement.contactInfo) {
@@ -92,6 +110,7 @@ Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
         }
         
         message += `\n📅 Pubblicato: ${announcement.createdAt.toLocaleDateString('it-IT')}`;
+        message += `\n🆔 ID: \`${announcement.announcementId}\``;
         
         return message;
     }
@@ -152,7 +171,6 @@ Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
                 
                 examples += `\n`;
             } catch (error) {
-                // Salta esempi che non si possono calcolare
                 continue;
             }
         }
@@ -161,7 +179,6 @@ Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
     }
 
     static calculateExamplePrice(announcement, kwhAmount) {
-        // Applica minimo se presente
         const finalKwh = Math.max(kwhAmount, announcement.minimumKwh || 0);
 
         if (announcement.pricingType === 'fixed') {
@@ -174,7 +191,6 @@ Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
         }
 
         if (announcement.pricingType === 'graduated') {
-            // Trova la fascia appropriata
             let applicableTier = announcement.pricingTiers[announcement.pricingTiers.length - 1];
             
             for (let tier of announcement.pricingTiers) {
@@ -195,7 +211,7 @@ Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
         throw new Error('Tipo di prezzo non supportato');
     }
 
-    // Messaggi per transazioni
+    // Messaggi per transazioni con ID copiabili
     static formatTransactionRequest(transaction, announcement) {
         let message = `💰 **NUOVA RICHIESTA DI ACQUISTO**\n\n`;
         
@@ -203,7 +219,6 @@ Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
         message += `👤 **Da:** @${buyerName}\n`;
         message += `⚡ **Quantità:** ${transaction.kwhAmount} KWH\n`;
         
-        // Calcolo prezzo con nuovo sistema
         if (transaction.kwhUsedForCalculation !== transaction.kwhAmount) {
             message += `🎯 **Applicato minimo:** ${transaction.kwhUsedForCalculation} KWH\n`;
         }
@@ -219,8 +234,9 @@ Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
             }
         }
         
-        message += `📍 **Posizione:** ${announcement?.location || 'Non specificata'}\n`;
-        message += `📅 **Richiesta il:** ${transaction.createdAt.toLocaleDateString('it-IT')}`;
+        message += `📍 **Posizione:** \`${announcement?.location || 'Non specificata'}\`\n`;
+        message += `📅 **Richiesta il:** ${transaction.createdAt.toLocaleDateString('it-IT')}\n`;
+        message += `🆔 **ID Transazione:** \`${transaction.transactionId}\``;
         
         return message;
     }
@@ -258,7 +274,6 @@ Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
         
         message += `• **Totale: €${transaction.totalAmount.toFixed(2)}**\n`;
         
-        // Calcola prezzo effettivo per KWH richiesto
         const effectivePrice = transaction.totalAmount / transaction.kwhAmount;
         if (Math.abs(effectivePrice - transaction.pricePerKwh) > 0.01) {
             message += `• Prezzo effettivo: ${effectivePrice.toFixed(3)}€/KWH\n`;
@@ -271,7 +286,153 @@ Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
         return message;
     }
 
-    // Messaggi per il processo di acquisto
+    // Messaggi per notifiche
+    static formatContactSummary(announcement, userStats) {
+        let message = `🛒 **RICHIESTA DI ACQUISTO**\n\n`;
+        
+        message += `📍 **Posizione:** \`${announcement.location}\`\n`;
+        message += `${this.formatPricingDisplay(announcement)}\n\n`;
+        
+        if (userStats && userStats.totalFeedback >= 5) {
+            message += `⭐ **Valutazione venditore:** ${userStats.avgRating.toFixed(1)}/5 (${userStats.totalFeedback} recensioni)\n\n`;
+        }
+        
+        message += `Confermi di voler procedere con l'acquisto da questo venditore?`;
+        
+        return message;
+    }
+
+    static formatPurchaseRequest(transaction, announcement) {
+        let message = `📥 **NUOVA RICHIESTA DI ACQUISTO**\n\n`;
+        
+        message += `👤 **Acquirente:** @${transaction.buyerUsername || 'utente'}\n`;
+        message += `📅 **Data/ora richiesta:** ${transaction.scheduledDate}\n`;
+        message += `🏢 **Brand colonnina:** ${transaction.brand}\n`;
+        message += `⚡ **Tipo corrente:** ${transaction.currentType}\n`;
+        message += `📍 **Posizione colonnina:** \`${transaction.location}\`\n`;
+        message += `🔢 **Seriale:** \`${transaction.serialNumber}\`\n`;
+        message += `🔌 **Connettore:** ${transaction.connector}\n\n`;
+        
+        if (announcement) {
+            message += `💰 **Il tuo annuncio:**\n`;
+            message += `${this.formatPricingDisplay(announcement)}\n\n`;
+        }
+        
+        message += `Accetti questa richiesta?`;
+        
+        return message;
+    }
+
+    static formatUserStats(userStats) {
+        let message = `⭐ **I TUOI FEEDBACK**\n\n`;
+        
+        if (userStats.totalFeedback > 0) {
+            message += `📊 **Statistiche:**\n`;
+            message += `• Valutazione media: ${userStats.avgRating.toFixed(1)}/5\n`;
+            message += `• Totale recensioni: ${userStats.totalFeedback}\n`;
+            message += `• Feedback positivi: ${userStats.positivePercentage}%\n\n`;
+            
+            if (userStats.sellerBadge) {
+                message += `🏆 **Badge:** ${userStats.sellerBadge === 'TOP' ? '🌟 VENDITORE TOP' : '✅ VENDITORE AFFIDABILE'}\n`;
+            }
+        } else {
+            message += 'Non hai ancora ricevuto feedback.\n\nCompleta le tue prime transazioni per ricevere valutazioni!';
+        }
+        
+        return message;
+    }
+
+    // Messaggi di stato
+    static getStatusText(status) {
+        const statusMap = {
+            'pending': '⏳ In attesa di conferma',
+            'pending_seller_confirmation': '⏳ Attesa conferma venditore',
+            'confirmed': '✅ Confermata dal venditore',
+            'charging_started': '⚡ Ricarica avviata',
+            'charging_in_progress': '🔋 In ricarica',
+            'charging_completed': '🏁 Ricarica completata',
+            'photo_uploaded': '📷 Foto caricata',
+            'kwh_declared': '📊 KWH dichiarati',
+            'payment_requested': '💳 Pagamento richiesto',
+            'payment_declared': '💰 Pagamento dichiarato',
+            'completed': '🎉 Completata con successo',
+            'cancelled': '❌ Annullata',
+            'disputed': '⚠️ In disputa'
+        };
+        return statusMap[status] || status;
+    }
+
+    static getStatusEmoji(status) {
+        const emojiMap = {
+            'pending': '⏳',
+            'pending_seller_confirmation': '⏳',
+            'confirmed': '✅',
+            'charging_started': '⚡',
+            'charging_in_progress': '🔋',
+            'charging_completed': '🏁',
+            'photo_uploaded': '📷',
+            'kwh_declared': '📊',
+            'payment_requested': '💳',
+            'payment_declared': '💰',
+            'completed': '🎉',
+            'cancelled': '❌',
+            'disputed': '⚠️'
+        };
+        return emojiMap[status] || '❓';
+    }
+
+    // Messaggi di errore
+    static get ERROR_MESSAGES() {
+        return {
+            INVALID_AMOUNT: '❌ Quantità non valida. Inserisci un numero tra 1 e 1000 KWH.',
+            INVALID_PRICE: '❌ Prezzo non valido. Inserisci un numero tra 0.01 e 10.00 €/KWH.',
+            INVALID_TIER_FORMAT: '❌ Formato non valido. Usa: `limite_kwh prezzo`\n\nEsempio: `30 0.45`',
+            INVALID_TIER_LIMIT: '❌ Il limite deve essere maggiore del precedente.',
+            INVALID_MINIMUM: '❌ KWH minimi non validi. Inserisci un numero tra 1 e 1000.',
+            ANNOUNCEMENT_NOT_FOUND: '❌ Annuncio non trovato o non più disponibile.',
+            TRANSACTION_NOT_FOUND: '❌ Transazione non trovata.',
+            UNAUTHORIZED: '❌ Non sei autorizzato per questa operazione.',
+            CANNOT_BUY_OWN: '❌ Non puoi acquistare dalla tua stessa offerta!',
+            GENERIC_ERROR: '❌ Si è verificato un errore. Riprova tra qualche minuto.',
+            INVALID_DATE: '❌ Data non valida. Usa il formato GG/MM/AAAA HH:MM'
+        };
+    }
+
+    // Messaggi informativi
+    static get INFO_MESSAGES() {
+        return {
+            PRICING_EXPLANATION: this.formatGraduatedPricingExplanation(),
+            MINIMUM_EXPLANATION: this.formatMinimumGuaranteeExplanation(),
+            PROCESS_HELP: `📋 **COME FUNZIONA**
+
+**Per Venditori:**
+1. Crea annuncio con i tuoi prezzi
+2. Ricevi richieste di acquisto
+3. Conferma o rifiuta le richieste
+4. Fornisci accesso alla ricarica
+5. Ricevi il pagamento
+6. Lascia feedback
+
+**Per Acquirenti:**
+1. Cerca offerte nella tua zona
+2. Invia richiesta di acquisto
+3. Attendi conferma del venditore
+4. Effettua la ricarica
+5. Paga come concordato
+6. Lascia feedback`,
+
+            SAFETY_TIPS: `🛡️ **CONSIGLI DI SICUREZZA**
+
+- Verifica sempre l'identità del venditore
+- Controlla le recensioni prima di acquistare
+- Paga solo dopo aver ricevuto l'energia
+- Usa metodi di pagamento tracciabili
+- Segnala comportamenti sospetti
+- Non condividere dati personali sensibili`
+        };
+    }
+
+    // Altri messaggi con campi copiabili
     static get BUY_PROCESS_START() {
         return `🛒 **PROCESSO DI ACQUISTO**
 
@@ -307,7 +468,7 @@ Iniziamo! Quanti KWH vuoi acquistare?`;
             message += `📊 **Tipo prezzo:** Fisso\n`;
         }
         
-        message += `📍 **Posizione:** ${announcement.location}\n`;
+        message += `📍 **Posizione:** \`${announcement.location}\`\n`;
         message += `📞 **Contatti:** ${announcement.contactInfo}\n\n`;
         
         message += `Confermi l'acquisto?`;
@@ -315,109 +476,73 @@ Iniziamo! Quanti KWH vuoi acquistare?`;
         return message;
     }
 
-    // Messaggi di stato
-    static getStatusText(status) {
-        const statusMap = {
-            'pending': '⏳ In attesa di conferma',
-            'confirmed': '✅ Confermata dal venditore',
-            'completed': '🎉 Completata con successo',
-            'cancelled': '❌ Annullata'
-        };
-        return statusMap[status] || status;
-    }
-
-    static getStatusEmoji(status) {
-        const emojiMap = {
-            'pending': '⏳',
-            'confirmed': '✅',
-            'completed': '🎉',
-            'cancelled': '❌'
-        };
-        return emojiMap[status] || '❓';
-    }
-
-    // Messaggi di errore
-    static get ERROR_MESSAGES() {
-        return {
-            INVALID_AMOUNT: '❌ Quantità non valida. Inserisci un numero tra 1 e 1000 KWH.',
-            INVALID_PRICE: '❌ Prezzo non valido. Inserisci un numero tra 0.01 e 10.00 €/KWH.',
-            INVALID_TIER_FORMAT: '❌ Formato non valido. Usa: `limite_kwh prezzo`\n\nEsempio: `30 0.45`',
-            INVALID_TIER_LIMIT: '❌ Il limite deve essere maggiore del precedente.',
-            INVALID_MINIMUM: '❌ KWH minimi non validi. Inserisci un numero tra 1 e 1000.',
-            ANNOUNCEMENT_NOT_FOUND: '❌ Annuncio non trovato o non più disponibile.',
-            TRANSACTION_NOT_FOUND: '❌ Transazione non trovata.',
-            UNAUTHORIZED: '❌ Non sei autorizzato per questa operazione.',
-            CANNOT_BUY_OWN: '❌ Non puoi acquistare dalla tua stessa offerta!',
-            GENERIC_ERROR: '❌ Si è verificato un errore. Riprova tra qualche minuto.'
-        };
-    }
-
-    // Messaggi informativi
-    static get INFO_MESSAGES() {
-        return {
-            PRICING_EXPLANATION: this.formatGraduatedPricingExplanation(),
-            MINIMUM_EXPLANATION: this.formatMinimumGuaranteeExplanation(),
-            PROCESS_HELP: `📋 **COME FUNZIONA**
-
-**Per Venditori:**
-1. Crea annuncio con i tuoi prezzi
-2. Ricevi richieste di acquisto
-3. Conferma o rifiuta le richieste
-4. Fornisci accesso alla ricarica
-5. Ricevi il pagamento
-6. Lascia feedback
-
-**Per Acquirenti:**
-1. Cerca offerte nella tua zona
-2. Invia richiesta di acquisto
-3. Attendi conferma del venditore
-4. Effettua la ricarica
-5. Paga come concordato
-6. Lascia feedback`,
-
-            SAFETY_TIPS: `🛡️ **CONSIGLI DI SICUREZZA**
-
-• Verifica sempre l'identità del venditore
-• Controlla le recensioni prima di acquistare
-• Paga solo dopo aver ricevuto l'energia
-• Usa metodi di pagamento tracciabili
-• Segnala comportamenti sospetti
-• Non condividere dati personali sensibili`
-        };
-    }
-
-    // Messaggi per feedback e recensioni
-    static formatFeedbackRequest(transaction, userRole) {
-        const otherUserRole = userRole === 'buyer' ? 'venditore' : 'acquirente';
-        
-        return `⭐ **LASCIA UNA RECENSIONE**
-
-Come è andata la transazione con questo ${otherUserRole}?
-
-La tua recensione aiuta altri utenti a scegliere in sicurezza.
-
-**Transazione:** ${transaction._id.toString().slice(-8)}
-**Importo:** €${transaction.totalAmount.toFixed(2)}
-**KWH:** ${transaction.kwhAmount}
-
-Seleziona il tuo voto:`;
-    }
-
-    // Messaggi per notifiche
     static formatNotification(type, data) {
         switch (type) {
             case 'new_request':
-                return `🔔 **NUOVA RICHIESTA**\n\nHai ricevuto una richiesta di acquisto per ${data.kwhAmount} KWH!\n\n💰 Guadagno: €${data.totalAmount.toFixed(2)}`;
+                return `🔔 **NUOVA RICHIESTA**\n\nHai ricevuto una richiesta di acquisto per ${data.kwhAmount} KWH!\n\n💰 Guadagno: €${data.totalAmount.toFixed(2)}\n🆔 ID: \`${data.transactionId}\``;
                 
             case 'request_confirmed':
-                return `✅ **RICHIESTA CONFERMATA**\n\nIl venditore ha accettato la tua richiesta!\n\n⚡ KWH: ${data.kwhAmount}\n💰 Totale: €${data.totalAmount.toFixed(2)}`;
+                return `✅ **RICHIESTA CONFERMATA**\n\nIl venditore ha accettato la tua richiesta!\n\n⚡ KWH: ${data.kwhAmount}\n💰 Totale: €${data.totalAmount.toFixed(2)}\n🆔 ID: \`${data.transactionId}\``;
                 
             case 'transaction_completed':
-                return `🎉 **TRANSAZIONE COMPLETATA**\n\nComplimenti! La transazione è stata completata con successo.\n\n💰 Importo: €${data.totalAmount.toFixed(2)}`;
+                return `🎉 **TRANSAZIONE COMPLETATA**\n\nComplimenti! La transazione è stata completata con successo.\n\n💰 Importo: €${data.totalAmount.toFixed(2)}\n🆔 ID: \`${data.transactionId}\``;
                 
             default:
                 return `🔔 **NOTIFICA**\n\n${data.message}`;
         }
+    }
+
+    // Messaggi aggiuntivi
+    static get CHARGING_CONFIRMED() {
+        return '⚡ **RICARICA IN CORSO**\n\nLa ricarica è stata attivata correttamente!';
+    }
+
+    static get CHARGING_TIME() {
+        return '⏰ **È ORA DI ATTIVARE LA RICARICA!**\n\nL\'acquirente ti sta aspettando. Attiva la ricarica ora.';
+    }
+
+    static get TRANSACTION_COMPLETED() {
+        return '🎉 **TRANSAZIONE COMPLETATA!**\n\nLa transazione è stata completata con successo.';
+    }
+
+    static get FEEDBACK_REQUEST() {
+        return '⭐ **LASCIA UN FEEDBACK**\n\nCom\'è andata la transazione? La tua valutazione aiuta la community.';
+    }
+
+    static get NEGATIVE_FEEDBACK_REASON() {
+        return '📝 **FEEDBACK NEGATIVO**\n\nCi dispiace che l\'esperienza non sia stata positiva. Puoi dirci cosa è andato storto?';
+    }
+
+    static get CHARGING_FAILED_RETRY() {
+        return '❌ **RICARICA NON RIUSCITA**\n\nL\'acquirente segnala che la ricarica non è partita. Riprova o verifica il problema.';
+    }
+
+    static get NOT_GROUP_MEMBER() {
+        return '❌ **ACCESSO NEGATO**\n\nDevi essere membro del gruppo per usare questo bot.';
+    }
+
+    static get BUY_DATETIME() {
+        return '📅 **QUANDO TI SERVE LA RICARICA?**\n\nInserisci data e ora nel formato:\n`GG/MM/AAAA HH:MM`\n\nEsempio: `25/12/2024 15:30`';
+    }
+
+    static get BUY_BRAND() {
+        return '🏢 **MARCA COLONNINA?**\n\nEsempio: Enel X, Be Charge, Ionity...';
+    }
+
+    static get BUY_LOCATION() {
+        return '📍 **POSIZIONE ESATTA COLONNINA?**\n\nInserisci indirizzo o coordinate GPS.';
+    }
+
+    static get BUY_SERIAL() {
+        return '🔢 **NUMERO SERIALE COLONNINA?**';
+    }
+
+    static get BUY_CONNECTOR() {
+        return '🔌 **TIPO CONNETTORE?**\n\nEsempio: Type 2, CCS, CHAdeMO...';
+    }
+
+    static formatAdminAlert(transactionId, issue, username) {
+        return `🚨 **ADMIN ALERT**\n\n**Problema:** ${issue}\n**Utente:** @${username}\n**Transazione:** \`${transactionId}\`\n\nIntervento richiesto.`;
     }
 }
 
