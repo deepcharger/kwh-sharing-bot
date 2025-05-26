@@ -6,95 +6,58 @@ class AnnouncementService {
 
     async createAnnouncement(data) {
         try {
-            // Validazione dati
-            if (!data.userId || !data.location || !data.description) {
-                throw new Error('Dati obbligatori mancanti');
-            }
-
-            // Validazione pricing
-            const errors = this.validatePricingData(data);
-            if (errors.length > 0) {
-                throw new Error(errors.join(', '));
-            }
-
             const announcement = {
                 announcementId: `A${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                 userId: data.userId,
                 location: data.location,
-                description: data.description,
-                availability: data.availability || 'Sempre disponibile',
-                contactInfo: data.contactInfo,
-                
-                // Sistema prezzi
-                pricingType: data.pricingType,
-                basePrice: data.pricingType === 'fixed' ? data.basePrice : undefined,
-                pricingTiers: data.pricingType === 'graduated' ? data.pricingTiers : undefined,
-                minimumKwh: data.minimumKwh || null,
-                
-                isActive: true,
+                price: data.price,
+                currentType: data.currentType,
+                zones: data.zones,
+                networks: data.networks,
+                paymentMethods: data.paymentMethods,
+                active: true,
+                messageId: null,
                 createdAt: new Date(),
-                updatedAt: new Date()
+                updatedAt: new Date(),
+                
+                // Nuovi campi per sistema prezzi
+                description: data.description || '',
+                availability: data.availability || 'Sempre disponibile',
+                contactInfo: data.contactInfo || '',
+                pricingType: data.pricingType || 'fixed',
+                basePrice: data.basePrice || data.price,
+                pricingTiers: data.pricingTiers || null,
+                minimumKwh: data.minimumKwh || null
             };
 
             const result = await this.collection.insertOne(announcement);
-            announcement._id = result.insertedId;
-            
-            console.log(`Annuncio creato: ${announcement.announcementId}`);
             return announcement;
-
         } catch (error) {
-            console.error('Errore nella creazione dell\'annuncio:', error);
-            throw error;
-        }
-    }
-
-    async getActiveAnnouncements(limit = 10) {
-        try {
-            const announcements = await this.collection
-                .find({ isActive: true })
-                .sort({ createdAt: -1 })
-                .limit(limit)
-                .toArray();
-
-            // Popola user info
-            const userIds = [...new Set(announcements.map(a => a.userId))];
-            const users = await this.db.getCollection('users')
-                .find({ userId: { $in: userIds } })
-                .toArray();
-            
-            const userMap = users.reduce((map, user) => {
-                map[user.userId] = user;
-                return map;
-            }, {});
-
-            announcements.forEach(ann => {
-                ann.userId = userMap[ann.userId] || { userId: ann.userId };
-            });
-
-            return announcements;
-        } catch (error) {
-            console.error('Errore nel recupero degli annunci:', error);
+            console.error('Error creating announcement:', error);
             throw error;
         }
     }
 
     async getAnnouncement(announcementId) {
         try {
-            const announcement = await this.collection.findOne({ 
+            return await this.collection.findOne({ 
                 announcementId: announcementId 
             });
-            
-            if (announcement) {
-                // Popola user info
-                const user = await this.db.getCollection('users').findOne({ 
-                    userId: announcement.userId 
-                });
-                announcement.userId = user || { userId: announcement.userId };
-            }
-            
-            return announcement;
         } catch (error) {
-            console.error('Errore nel recupero dell\'annuncio:', error);
+            console.error('Error getting announcement:', error);
+            throw error;
+        }
+    }
+
+    async getActiveAnnouncements(limit = 20) {
+        try {
+            return await this.collection
+                .find({ active: true })
+                .sort({ createdAt: -1 })
+                .limit(limit)
+                .toArray();
+        } catch (error) {
+            console.error('Error getting active announcements:', error);
             throw error;
         }
     }
@@ -102,11 +65,14 @@ class AnnouncementService {
     async getUserAnnouncements(userId) {
         try {
             return await this.collection
-                .find({ userId: userId })
+                .find({ 
+                    userId: userId,
+                    active: true 
+                })
                 .sort({ createdAt: -1 })
                 .toArray();
         } catch (error) {
-            console.error('Errore nel recupero annunci utente:', error);
+            console.error('Error getting user announcements:', error);
             throw error;
         }
     }
@@ -114,23 +80,24 @@ class AnnouncementService {
     async deleteAnnouncement(announcementId, userId) {
         try {
             const result = await this.collection.updateOne(
-                { announcementId: announcementId, userId: userId },
+                { 
+                    announcementId: announcementId, 
+                    userId: userId 
+                },
                 { 
                     $set: { 
-                        isActive: false, 
-                        updatedAt: new Date() 
+                        active: false,
+                        updatedAt: new Date()
                     } 
                 }
             );
-
             return result.modifiedCount > 0;
         } catch (error) {
-            console.error('Errore nell\'eliminazione dell\'annuncio:', error);
+            console.error('Error deleting announcement:', error);
             throw error;
         }
     }
 
-    // NUOVO: Metodo per aggiornare un annuncio
     async updateAnnouncement(announcementId, updateData) {
         try {
             const result = await this.collection.updateOne(
@@ -142,10 +109,9 @@ class AnnouncementService {
                     }
                 }
             );
-
             return result.modifiedCount > 0;
         } catch (error) {
-            console.error('Errore nell\'aggiornamento dell\'annuncio:', error);
+            console.error('Error updating announcement:', error);
             throw error;
         }
     }
@@ -153,7 +119,7 @@ class AnnouncementService {
     async getAnnouncementStats() {
         try {
             const stats = await this.collection.aggregate([
-                { $match: { isActive: true } },
+                { $match: { active: true } },
                 {
                     $group: {
                         _id: null,
@@ -196,67 +162,19 @@ class AnnouncementService {
                 maxPrice: 0
             };
         } catch (error) {
-            console.error('Errore nel calcolo delle statistiche:', error);
+            console.error('Error getting announcement stats:', error);
             throw error;
         }
     }
 
-    validatePricingData(data) {
-        const errors = [];
-        
-        if (!data.pricingType || !['fixed', 'graduated'].includes(data.pricingType)) {
-            errors.push('Tipo di prezzo non valido');
-        }
-        
-        if (data.pricingType === 'fixed') {
-            if (!data.basePrice || data.basePrice <= 0) {
-                errors.push('Prezzo fisso deve essere maggiore di 0');
-            }
-        }
-        
-        if (data.pricingType === 'graduated') {
-            if (!data.pricingTiers || !Array.isArray(data.pricingTiers) || data.pricingTiers.length === 0) {
-                errors.push('Almeno una fascia di prezzo è richiesta');
-            } else {
-                // Validazione fasce
-                for (let i = 0; i < data.pricingTiers.length; i++) {
-                    const tier = data.pricingTiers[i];
-                    
-                    if (!tier.price || tier.price <= 0) {
-                        errors.push(`Prezzo fascia ${i + 1} deve essere maggiore di 0`);
-                    }
-                    
-                    if (i < data.pricingTiers.length - 1) {
-                        if (!tier.limit || tier.limit <= 0) {
-                            errors.push(`Limite fascia ${i + 1} deve essere maggiore di 0`);
-                        }
-                        
-                        if (i > 0 && tier.limit <= data.pricingTiers[i-1].limit) {
-                            errors.push(`Limite fascia ${i + 1} deve essere maggiore del precedente`);
-                        }
-                    }
-                    
-                    if (i === data.pricingTiers.length - 1 && tier.limit !== null) {
-                        errors.push('L\'ultima fascia deve avere limite null');
-                    }
-                }
-            }
-        }
-        
-        if (data.minimumKwh && (isNaN(data.minimumKwh) || data.minimumKwh <= 0)) {
-            errors.push('KWH minimi devono essere maggiori di 0');
-        }
-        
-        return errors;
-    }
-
-    // Metodo helper per formattare annunci con campi copiabili
+    // Metodo per formattare annuncio con posizione copiabile (per chat privata)
     async formatAnnouncementMessage(announcement, userStats) {
         let message = `🔋 **OFFERTA ENERGIA**\n\n`;
         
-        const user = announcement.userId;
-        const username = user.username || user.firstName || 'Utente';
-        message += `👤 **Venditore:** @${username}\n`;
+        if (announcement.userId) {
+            const username = announcement.userId.username || announcement.userId.firstName || 'Utente';
+            message += `👤 **Venditore:** @${username}\n`;
+        }
         
         // Badge venditore
         if (userStats && userStats.totalFeedback >= 5) {
@@ -269,11 +187,33 @@ class AnnouncementService {
         
         // Posizione copiabile
         message += `\n📍 **Posizione:** \`${announcement.location}\`\n`;
-        message += `📝 **Descrizione:** ${announcement.description}\n`;
-        message += `⏰ **Disponibilità:** ${announcement.availability}\n`;
+        
+        if (announcement.description) {
+            message += `📝 **Descrizione:** ${announcement.description}\n`;
+        }
+        
+        if (announcement.availability) {
+            message += `⏰ **Disponibilità:** ${announcement.availability}\n`;
+        }
         
         // Pricing
         message += `\n${this.formatPricing(announcement)}\n`;
+        
+        if (announcement.currentType) {
+            message += `\n⚡ **Tipo corrente:** ${announcement.currentType}\n`;
+        }
+        
+        if (announcement.zones) {
+            message += `📍 **Zone:** ${announcement.zones}\n`;
+        }
+        
+        if (announcement.networks) {
+            message += `🌐 **Reti:** ${announcement.networks}\n`;
+        }
+        
+        if (announcement.paymentMethods) {
+            message += `💳 **Pagamenti:** ${announcement.paymentMethods}\n`;
+        }
         
         if (announcement.contactInfo) {
             message += `📞 **Contatti:** ${announcement.contactInfo}\n`;
@@ -285,35 +225,33 @@ class AnnouncementService {
         return message;
     }
 
-    // NUOVO METODO: Formatta annuncio per pubblicazione nel gruppo con posizione copiabile
+    // METODO CHIAVE: Formatta annuncio per pubblicazione nel gruppo con posizione copiabile
     formatAnnouncementForGroup(announcement, userStats) {
         let message = `🔋 **Vendita kWh sharing**\n\n`;
         
-        const user = announcement.userId;
-        const username = user.username || user.firstName || 'Utente';
-        message += `👤 Venditore: @${username}`;
+        // Venditore con eventuale badge
+        let sellerInfo = `👤 Venditore: @${announcement.userId?.username || announcement.contactInfo || 'utente'}`;
         
-        // Badge venditore
         if (userStats && userStats.totalFeedback >= 5) {
             if (userStats.positivePercentage >= 95) {
-                message += ` 🌟 TOP`;
+                sellerInfo += ` 🌟 TOP`;
             } else if (userStats.positivePercentage >= 90) {
-                message += ` ✅ AFFIDABILE`;
+                sellerInfo += ` ✅ AFFIDABILE`;
             }
         }
         
-        message += '\n';
+        message += sellerInfo + '\n';
         
         // IMPORTANTE: Posizione copiabile con backtick
         message += `📍 Posizione: \`${announcement.location}\`\n`;
         
         // Pricing compatto
         if (announcement.pricingType === 'fixed') {
-            message += `💰 Prezzo: ${announcement.basePrice}€/KWH`;
+            message += `💰 Prezzo: ${announcement.basePrice || announcement.price}€/KWH`;
             if (announcement.minimumKwh) {
                 message += ` (min ${announcement.minimumKwh} KWH)`;
             }
-        } else {
+        } else if (announcement.pricingType === 'graduated' && announcement.pricingTiers) {
             message += `💰 Prezzi: `;
             const tiers = announcement.pricingTiers;
             if (tiers.length > 0) {
@@ -323,11 +261,23 @@ class AnnouncementService {
                     message += ` a ${lastTier.price}€/KWH`;
                 }
             }
+        } else {
+            message += `💰 Prezzo: ${announcement.price || announcement.basePrice}€/KWH`;
         }
         
         message += '\n';
         
-        // Disponibilità
+        // Tipo corrente
+        if (announcement.currentType) {
+            message += `⚡ Corrente: ${announcement.currentType}\n`;
+        }
+        
+        // Zone (compatte)
+        if (announcement.zones) {
+            message += `📍 Zone: ${announcement.zones}\n`;
+        }
+        
+        // Disponibilità (solo se diversa da sempre)
         if (announcement.availability && announcement.availability !== 'Sempre disponibile') {
             message += `⏰ ${announcement.availability}\n`;
         }
@@ -340,14 +290,14 @@ class AnnouncementService {
 
     formatPricing(announcement) {
         if (announcement.pricingType === 'fixed') {
-            let text = `💰 **Prezzo:** ${announcement.basePrice}€/KWH`;
+            let text = `💰 **Prezzo:** ${announcement.basePrice || announcement.price}€/KWH`;
             if (announcement.minimumKwh) {
                 text += `\n🎯 **Minimo garantito:** ${announcement.minimumKwh} KWH`;
             }
             return text;
         }
         
-        if (announcement.pricingType === 'graduated') {
+        if (announcement.pricingType === 'graduated' && announcement.pricingTiers) {
             let text = `📊 **Prezzi graduati:**\n`;
             
             for (let i = 0; i < announcement.pricingTiers.length; i++) {
@@ -368,7 +318,7 @@ class AnnouncementService {
             return text.trim();
         }
         
-        return 'Prezzo non configurato';
+        return `💰 **Prezzo:** ${announcement.price || announcement.basePrice || 'Non specificato'}€/KWH`;
     }
 }
 
