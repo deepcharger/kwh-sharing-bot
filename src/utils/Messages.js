@@ -1,485 +1,424 @@
 class Messages {
-    // FIX: Aggiunto il messaggio WELCOME mancante
+    // Messaggi di benvenuto
     static get WELCOME() {
-        return `👋 *Benvenuto nel Bot KWH Sharing!*
+        return `🔋 **Benvenuto nel Marketplace Energia!**
 
-🔋 Questo bot ti permette di:
-• Pubblicare annunci di vendita KWH
-• Acquistare KWH da altri utenti  
-• Gestire transazioni in sicurezza
-• Lasciare e ricevere feedback
+Qui puoi comprare e vendere energia per auto elettriche in modo sicuro e conveniente.
 
-Per utilizzare il bot devi essere membro del gruppo autorizzato.
+🌟 **Funzionalità principali:**
+• Pubblica offerte di ricarica
+• Cerca le migliori tariffe
+• Sistema di pagamento sicuro
+• Valutazioni e recensioni
 
-✅ *Verificato!* Sei abilitato ad usare il bot.
-
-Usa i pulsanti qui sotto per navigare:`;
+Usa i pulsanti per iniziare!`;
     }
 
-    static get NOT_GROUP_MEMBER() {
-        return `❌ *Accesso negato*
+    static get SELL_WELCOME() {
+        return `🔋 **VENDI LA TUA ENERGIA**
 
-Devi essere membro del gruppo autorizzato per utilizzare questo bot.
+Guadagna condividendo l'accesso alle tue ricariche!
 
-Contatta l'amministratore per maggiori informazioni.`;
+💰 **Vantaggi:**
+• Imposta prezzi fissi o graduati
+• Controllo totale sulle condizioni
+• Pagamenti diretti
+• Sistema di recensioni
+
+Pronto a creare il tuo primo annuncio?`;
     }
 
-    static get HELP_TEXT() {
-        return `❓ *GUIDA BOT KWH SHARING*
+    // Messaggi per prezzi graduati
+    static formatGraduatedPricingExplanation() {
+        return `📊 **COME FUNZIONANO I PREZZI GRADUATI**
 
-🔋 *VENDERE KWH:*
-1. Clicca "🔋 Vendi KWH"
-2. Inserisci prezzo, tipo corrente, zone coperte
-3. Il bot pubblicherà l'annuncio nel topic
-4. Riceverai notifiche per ogni richiesta
+I prezzi graduati permettono di offrire sconti per quantità maggiori.
 
-🛒 *COMPRARE KWH:*
-1. Vai nel topic degli annunci
-2. Clicca "Contatta venditore" su un annuncio
-3. Segui la procedura guidata
-4. Dopo la ricarica, scatta foto del display
+**Esempio:**
+• 0-30 KWH: TUTTO a 0,45€/KWH
+• 31-60 KWH: TUTTO a 0,40€/KWH  
+• Oltre 60 KWH: TUTTO a 0,35€/KWH
 
-⭐ *FEEDBACK:*
-• Ogni transazione richiede feedback reciproco
-• >90% feedback positivi = VENDITORE AFFIDABILE
-• >95% feedback positivi = VENDITORE TOP
+**Calcoli:**
+• Chi ricarica 25 KWH → 25 × 0,45€ = €11,25
+• Chi ricarica 45 KWH → 45 × 0,40€ = €18,00
+• Chi ricarica 80 KWH → 80 × 0,35€ = €28,00
 
-📞 *Supporto:* Contatta @${process.env.ADMIN_USERNAME || 'admin'}`;
+Il prezzo si applica a TUTTA la quantità, non solo alla fascia.`;
     }
 
-    static get SELL_START() {
-        return `💰 *CREAZIONE ANNUNCIO DI VENDITA*
+    static formatMinimumGuaranteeExplanation() {
+        return `🎯 **MINIMO GARANTITO**
 
-Iniziamo con le informazioni base del tuo annuncio.
+Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
 
-💶 *Inserisci il prezzo per KWH:*
-Esempio: 0,35
+**Esempio con minimo 15 KWH:**
+• Chi ricarica 8 KWH → paga per 15 KWH
+• Chi ricarica 20 KWH → paga per 20 KWH
 
-💡 *Suggerimento:* Il prezzo medio di mercato è 0,30-0,40€/KWH`;
+È utile per:
+• Coprire costi fissi di attivazione
+• Garantire un compenso minimo
+• Scoraggiare ricariche troppo piccole`;
     }
 
-    static get SELL_CURRENT_TYPE() {
-        return `⚡ *CHE TIPO DI CORRENTE OFFRI?*
-
-Seleziona il tipo di ricarica che puoi attivare:
-
-🔌 *DC* = Ricarica veloce/ultrarapida
-⚡ *AC* = Ricarica normale/accelerata  
-🔋 *Entrambi* = Puoi attivare sia AC che DC
-⚡ *DC minimo 30KW* = Solo DC con potenza minima`;
+    // Template per annunci
+    static formatAnnouncementDisplay(announcement, userStats) {
+        let message = `🔋 **OFFERTA ENERGIA**\n\n`;
+        
+        // Info venditore
+        const username = announcement.userId.username || announcement.userId.firstName || 'Utente';
+        message += `👤 **Venditore:** @${username}\n`;
+        
+        // Badge venditore se disponibile
+        if (userStats && userStats.rating.totalRatings >= 5) {
+            const rating = userStats.rating.avgRating;
+            if (rating >= 4.5) {
+                message += `⭐ **VENDITORE TOP** (${rating.toFixed(1)}/5)\n`;
+            } else if (rating >= 4.0) {
+                message += `✅ **VENDITORE AFFIDABILE** (${rating.toFixed(1)}/5)\n`;
+            }
+        }
+        
+        message += `\n📍 **Posizione:** ${announcement.location}\n`;
+        message += `📝 **Descrizione:** ${announcement.description}\n`;
+        message += `⏰ **Disponibilità:** ${announcement.availability}\n`;
+        
+        // Pricing - NUOVO FORMATO
+        message += `\n${this.formatPricingDisplay(announcement)}\n`;
+        
+        if (announcement.contactInfo) {
+            message += `📞 **Contatti:** ${announcement.contactInfo}\n`;
+        }
+        
+        message += `\n📅 Pubblicato: ${announcement.createdAt.toLocaleDateString('it-IT')}`;
+        
+        return message;
     }
 
-    static get SELL_ZONES() {
-        return `🌍 *INDICA LE ZONE COPERTE:*
+    static formatPricingDisplay(announcement) {
+        if (!announcement.pricingType) {
+            return '💰 **Prezzo:** Non specificato';
+        }
 
-Specifica dove puoi attivare ricariche.
+        if (announcement.pricingType === 'fixed') {
+            let pricing = `💰 **Prezzo Fisso:** ${announcement.basePrice}€/KWH`;
+            
+            if (announcement.minimumKwh) {
+                pricing += `\n🎯 **Minimo garantito:** ${announcement.minimumKwh} KWH`;
+                pricing += `\n💡 *Minimo €${(announcement.minimumKwh * announcement.basePrice).toFixed(2)}*`;
+            }
+            
+            return pricing;
+        }
 
-*Esempi:*
-• ITALIA E ESTERO
-• LOMBARDIA  
-• MILANO CENTRO
-• AUTOSTRADE A1-A4
-• EUROPA
+        if (announcement.pricingType === 'graduated') {
+            let pricing = `📊 **Prezzi Graduati:**\n`;
+            
+            for (let i = 0; i < announcement.pricingTiers.length; i++) {
+                const tier = announcement.pricingTiers[i];
+                const prevLimit = i > 0 ? announcement.pricingTiers[i-1].limit : 0;
+                
+                if (tier.limit === null) {
+                    pricing += `• **Oltre ${prevLimit} KWH:** TUTTO a ${tier.price}€/KWH\n`;
+                } else {
+                    const range = i === 0 ? `0-${tier.limit}` : `${prevLimit + 1}-${tier.limit}`;
+                    pricing += `• **${range} KWH:** TUTTO a ${tier.price}€/KWH\n`;
+                }
+            }
+            
+            if (announcement.minimumKwh) {
+                pricing += `🎯 **Minimo garantito:** ${announcement.minimumKwh} KWH`;
+            }
+            
+            return pricing.trim();
+        }
 
-Scrivi le zone che copri:`;
+        return '💰 **Prezzo:** Errore configurazione';
     }
 
-    static get SELL_NETWORKS() {
-        return `🔌 *RETI DI RICARICA DISPONIBILI*
-
-Quali reti di colonnine puoi attivare?
-
-🌐 *Tutte le colonnine* - Hai accesso universale
-📝 *Reti specifiche* - Hai accesso a reti particolari
-
-Seleziona un'opzione:`;
+    // Calcolo esempi di prezzo
+    static formatPriceExamples(announcement, exampleKwh = [10, 30, 50, 100]) {
+        let examples = `💡 **Esempi di costo:**\n`;
+        
+        for (const kwh of exampleKwh) {
+            try {
+                const calculation = this.calculateExamplePrice(announcement, kwh);
+                examples += `• ${kwh} KWH → €${calculation.totalAmount.toFixed(2)}`;
+                
+                if (calculation.appliedMinimum) {
+                    examples += ` *(minimo ${calculation.kwhUsed} KWH)*`;
+                }
+                
+                examples += `\n`;
+            } catch (error) {
+                // Salta esempi che non si possono calcolare
+                continue;
+            }
+        }
+        
+        return examples.trim();
     }
 
-    static get SELL_NETWORKS_SPECIFIC() {
-        return `📝 *SPECIFICA LE RETI DISPONIBILI*
+    static calculateExamplePrice(announcement, kwhAmount) {
+        // Applica minimo se presente
+        const finalKwh = Math.max(kwhAmount, announcement.minimumKwh || 0);
 
-Inserisci i nomi delle reti che puoi attivare, una per riga.
+        if (announcement.pricingType === 'fixed') {
+            return {
+                totalAmount: finalKwh * announcement.basePrice,
+                kwhUsed: finalKwh,
+                pricePerKwh: announcement.basePrice,
+                appliedMinimum: finalKwh > kwhAmount
+            };
+        }
 
-*Esempi:*
-ENEL X
-IONITY  
-BE CHARGE
-TESLA SUPERCHARGER
-FASTNED
+        if (announcement.pricingType === 'graduated') {
+            // Trova la fascia appropriata
+            let applicableTier = announcement.pricingTiers[announcement.pricingTiers.length - 1];
+            
+            for (let tier of announcement.pricingTiers) {
+                if (tier.limit === null || finalKwh <= tier.limit) {
+                    applicableTier = tier;
+                    break;
+                }
+            }
 
-Scrivi le tue reti:`;
+            return {
+                totalAmount: finalKwh * applicableTier.price,
+                kwhUsed: finalKwh,
+                pricePerKwh: applicableTier.price,
+                appliedMinimum: finalKwh > kwhAmount
+            };
+        }
+
+        throw new Error('Tipo di prezzo non supportato');
     }
 
-    static get SELL_AVAILABILITY() {
-        return `🕐 *DISPONIBILITÀ ORARIA*
-
-Quando sei disponibile per attivare ricariche?
-
-*Esempi:*
-• DALLE 06:30 ALLE 22:00
-• H24 SU PRENOTAZIONE
-• SOLO WEEKEND
-• FERIALI 9-18
-
-Scrivi la tua disponibilità:`;
+    // Messaggi per transazioni
+    static formatTransactionRequest(transaction, announcement) {
+        let message = `💰 **NUOVA RICHIESTA DI ACQUISTO**\n\n`;
+        
+        const buyerName = transaction.buyerId.username || transaction.buyerId.firstName || 'Acquirente';
+        message += `👤 **Da:** @${buyerName}\n`;
+        message += `⚡ **Quantità:** ${transaction.kwhAmount} KWH\n`;
+        
+        // Calcolo prezzo con nuovo sistema
+        if (transaction.kwhUsedForCalculation !== transaction.kwhAmount) {
+            message += `🎯 **Applicato minimo:** ${transaction.kwhUsedForCalculation} KWH\n`;
+        }
+        
+        message += `💰 **Prezzo:** ${transaction.pricePerKwh}€/KWH\n`;
+        message += `💵 **Totale:** €${transaction.totalAmount.toFixed(2)}\n\n`;
+        
+        if (announcement && announcement.pricingType === 'graduated' && transaction.appliedTier) {
+            if (transaction.appliedTier.limit) {
+                message += `📊 **Fascia applicata:** fino a ${transaction.appliedTier.limit} KWH\n`;
+            } else {
+                message += `📊 **Fascia applicata:** illimitata\n`;
+            }
+        }
+        
+        message += `📍 **Posizione:** ${announcement?.location || 'Non specificata'}\n`;
+        message += `📅 **Richiesta il:** ${transaction.createdAt.toLocaleDateString('it-IT')}`;
+        
+        return message;
     }
 
-    static get SELL_PAYMENT() {
-        return `💳 *METODO DI PAGAMENTO*
-
-Come vuoi ricevere i pagamenti?
-
-*Esempi:*
-• PAYPAL
-• REVOLUT
-• BONIFICO BANCARIO
-• PAYPAL, REVOLUT
-• SATISPAY
-
-Scrivi i tuoi metodi accettati:`;
+    static formatTransactionSummary(transaction, announcement, userRole) {
+        let message = `📋 **RIEPILOGO TRANSAZIONE**\n\n`;
+        
+        message += `🆔 **ID:** \`${transaction._id.toString().slice(-8)}\`\n`;
+        message += `📅 **Data:** ${transaction.createdAt.toLocaleDateString('it-IT')}\n`;
+        message += `📊 **Stato:** ${this.getStatusText(transaction.status)}\n\n`;
+        
+        const buyerName = transaction.buyerId.username || transaction.buyerId.firstName || 'Acquirente';
+        const sellerName = transaction.sellerId.username || transaction.sellerId.firstName || 'Venditore';
+        
+        message += `👤 **Acquirente:** @${buyerName}\n`;
+        message += `👤 **Venditore:** @${sellerName}\n\n`;
+        
+        message += `⚡ **Energia:**\n`;
+        message += `• Richiesta: ${transaction.kwhAmount} KWH\n`;
+        
+        if (transaction.appliedMinimum) {
+            message += `• Per calcolo: ${transaction.kwhUsedForCalculation} KWH *(minimo applicato)*\n`;
+        }
+        
+        message += `\n💰 **Costi:**\n`;
+        message += `• Prezzo: ${transaction.pricePerKwh}€/KWH\n`;
+        
+        if (announcement?.pricingType === 'graduated' && transaction.appliedTier) {
+            if (transaction.appliedTier.limit) {
+                message += `• Fascia: fino a ${transaction.appliedTier.limit} KWH\n`;
+            } else {
+                message += `• Fascia: illimitata\n`;
+            }
+        }
+        
+        message += `• **Totale: €${transaction.totalAmount.toFixed(2)}**\n`;
+        
+        // Calcola prezzo effettivo per KWH richiesto
+        const effectivePrice = transaction.totalAmount / transaction.kwhAmount;
+        if (Math.abs(effectivePrice - transaction.pricePerKwh) > 0.01) {
+            message += `• Prezzo effettivo: ${effectivePrice.toFixed(3)}€/KWH\n`;
+        }
+        
+        if (transaction.status === 'completed' && transaction.completedAt) {
+            message += `\n✅ **Completata il:** ${transaction.completedAt.toLocaleDateString('it-IT')}`;
+        }
+        
+        return message;
     }
 
-    static get SELL_CONDITIONS() {
-        return `📋 *CONDIZIONI PARTICOLARI (opzionale)*
+    // Messaggi per il processo di acquisto
+    static get BUY_PROCESS_START() {
+        return `🛒 **PROCESSO DI ACQUISTO**
 
-Hai condizioni speciali o note aggiuntive?
+Segui questi passaggi per acquistare energia:
 
-*Esempi:*
-• RICARICA MINIMA 30 KW
-• SOLO SU PRENOTAZIONE
-• SCONTO PER QUANTITÀ >50KW
-• PAGAMENTO ANTICIPATO
+1️⃣ **Quantità** - Specifica quanti KWH vuoi
+2️⃣ **Conferma** - Verifica prezzo e condizioni  
+3️⃣ **Contatto** - Il venditore ti contatterà
+4️⃣ **Ricarica** - Effettua la ricarica concordata
+5️⃣ **Pagamento** - Paga come concordato
+6️⃣ **Valutazione** - Lascia un feedback
 
-Scrivi le tue condizioni (o /skip per saltare):`;
+Iniziamo! Quanti KWH vuoi acquistare?`;
     }
 
-    static formatAnnouncementPreview(data) {
-        return `📋 *ANTEPRIMA ANNUNCIO:*
-
-💰 Prezzo: *${data.price}€ AL KWH*
-⚡ Corrente: *${data.currentTypeText}*
-🌍 Zone: *${data.zones}*
-🔌 Reti: *${data.networksText}*
-🕐 Disponibilità: *${data.availability}*
-💳 Pagamento: *${data.paymentMethods}*
-${data.conditions ? `📋 Condizioni: *${data.conditions}*` : ''}
-
-Tutto corretto?`;
-    }
-
-    static get ANNOUNCEMENT_PUBLISHED() {
-        return `✅ *ANNUNCIO PUBBLICATO CON SUCCESSO!*
-
-Il tuo annuncio è ora visibile nel topic del gruppo.
-Riceverai una notifica per ogni richiesta di acquisto.
-
-🔔 *Attivate notifiche* per non perdere opportunità di vendita!`;
-    }
-
-    static formatContactSummary(announcement, userStats) {
-        const badge = userStats.sellerBadge ? 
-            `⭐ ${userStats.sellerBadge === 'TOP' ? 'VENDITORE TOP' : 'VENDITORE AFFIDABILE'} (${userStats.positivePercentage}% positivi)` : '';
-
-        return `📋 *RIASSUNTO ANNUNCIO ${announcement.announcementId}*
-
-👤 Venditore: @${announcement.username || 'utente'} ${badge}
-💰 Prezzo: *${announcement.price}€ AL KWH*
-⚡ Corrente: *${announcement.currentTypeText}*
-🌍 Zone: *${announcement.zones}*
-💳 Pagamento: *${announcement.paymentMethods}*
-
-${announcement.conditions ? `📋 *CLAUSOLE DEL VENDITORE:*\n${announcement.conditions}\n\n` : ''}❓ *Hai compreso le condizioni e intendi proseguire?*`;
-    }
-
-    static get BUY_DATETIME() {
-        return `📅 *QUANDO VUOI EFFETTUARE LA RICARICA?*
-
-Inserisci data e ora nel formato:
-*GG/MM/AAAA HH:MM*
-
-*Esempi:*
-• 23/05/2025 14:30
-• 24/05/2025 09:15
-
-⏰ *Importante:* Assicurati di essere disponibile all'orario indicato!`;
-    }
-
-    static get BUY_BRAND() {
-        return `🏢 *QUALE BRAND DI COLONNINA UTILIZZERAI?*
-
-Indica il gestore della colonnina dove vuoi ricaricare.
-
-*Esempi comuni:*
-• ENEL X
-• IONITY
-• BE CHARGE  
-• TESLA SUPERCHARGER
-• FASTNED
-• EVWAY
-
-Scrivi il brand:`;
-    }
-
-    static get BUY_LOCATION() {
-        return `📍 *POSIZIONE DELLA COLONNINA*
-
-Invia la posizione GPS della colonnina oppure scrivi l'indirizzo completo.
-
-*Metodi:*
-🗺️ Usa il tasto "📎 Allega" → "Posizione" 
-📝 Scrivi indirizzo: "Via Roma 123, Milano"
-
-Questo aiuta il venditore a localizzare la colonnina.`;
-    }
-
-    static get BUY_SERIAL() {
-        return `🔢 *NUMERO SERIALE COLONNINA*
-
-Inserisci il numero seriale completo della colonnina o almeno le ultime 4-6 cifre.
-
-*Dove trovarlo:*
-• Etichetta sulla colonnina
-• Display iniziale
-• App del gestore
-
-*Esempi:*
-• ABC123456789
-• ...6789 (ultime cifre)
-
-Scrivi il seriale:`;
-    }
-
-    static get BUY_CONNECTOR() {
-        return `🔌 *QUALE CONNETTORE VUOI ATTIVARE?*
-
-Indica il tipo di connettore che utilizzerai.
-
-*Tipi comuni:*
-• CCS2 (Combo 2) - DC
-• CHAdeMO - DC  
-• Type2 (Mennekes) - AC
-• Type1 (J1772) - AC
-
-*Se ci sono più connettori dello stesso tipo*, specifica anche il numero:
-• CCS2 1 (primo connettore CCS)
-• CCS2 2 (secondo connettore CCS)
-• Type2 1 (primo connettore Type2)
-• Type2 2 (secondo connettore Type2)
-
-Scrivi il tipo di connettore (e numero se necessario):`;
-    }
-
-    static formatPurchaseRequest(transactionData, announcement) {
-        return `🔔 *NUOVA RICHIESTA DI ACQUISTO*
-
-👤 Acquirente: @${transactionData.buyerUsername}
-📋 Annuncio: ${announcement.announcementId}
-
-📅 Data/ora: *${transactionData.scheduledDate}*
-🏢 Brand: *${transactionData.brand}*
-⚡ Tipo: *${transactionData.currentType}*
-📍 Posizione: *${transactionData.location}*
-🔢 Seriale: *${transactionData.serialNumber}*
-🔌 Connettore: *${transactionData.connector}*
-
-Accetti questa richiesta?`;
-    }
-
-    static get CHARGING_TIME() {
-        return `⏰ *È IL MOMENTO DELLA RICARICA!*
-
-Tutti i dettagli sono confermati.
-Quando sei pronto ad attivare la ricarica, premi il pulsante qui sotto.
-
-🔋 *Ricorda:*
-• Verifica che la colonnina sia libera
-• Controlla il numero seriale
-• Attiva il connettore corretto`;
-    }
-
-    static get CHARGING_ACTIVATED() {
-        return `⚡ *RICARICA ATTIVATA!*
-
-Controlla il connettore e conferma se la ricarica è iniziata.
-
-💡 *Se non sta caricando:*
-• Verifica che il cavo sia inserito bene
-• Controlla che l'auto sia pronta
-• Riprova l'attivazione`;
-    }
-
-    static get CHARGING_CONFIRMED() {
-        return `✅ *RICARICA CONFERMATA IN CORSO!*
-
-⏱️ La ricarica è iniziata correttamente.
-
-Quando hai terminato di caricare, premi il pulsante per continuare.`;
-    }
-
-    static get CHARGING_FAILED_RETRY() {
-        return `❌ *RICARICA NON AVVIATA*
-
-Nessun problema! Proviamo a risolvere.
-
-🔧 *Possibili soluzioni:*
-• Riprova l'attivazione
-• Cambia connettore
-• Trova colonnina alternativa`;
-    }
-
-    static get PHOTO_UPLOAD_REQUEST() {
-        return `📸 *CONFERMA KWH RICEVUTI*
-
-Per completare la transazione devi:
-
-1️⃣ *Scatta una foto* del display della colonnina che mostra i KWH ricevuti
-2️⃣ *Scrivi il numero esatto* di KWH nel messaggio successivo
-
-📷 *Consigli per la foto:*
-• Inquadra tutto il display
-• Assicurati che i numeri siano leggibili
-• Evita riflessi e ombre
-• Foto nitida e ben illuminata
-
-*Invia prima la foto, poi il numero.*`;
-    }
-
-    static get PHOTO_RECEIVED() {
-        return `📷 *Foto ricevuta!*
-
-Ora scrivi i KWH ricevuti (solo il numero):
-
-*Esempi:*
-• 35.2
-• 28.7
-• 42
-
-💡 Inserisci solo il numero, senza unità di misura.`;
-    }
-
-    static formatKwhValidation(validationResult) {
-        if (validationResult.isValid) {
-            return `✅ *DATI CONFERMATI DAL BOT*
-
-📊 KWH validati: *${validationResult.declaredKwh} KWH*
-
-Procedi con il pagamento come concordato con il venditore.`;
+    static formatBuyConfirmation(announcement, kwhAmount) {
+        const calculation = this.calculateExamplePrice(announcement, kwhAmount);
+        
+        let message = `✅ **CONFERMA ACQUISTO**\n\n`;
+        
+        message += `⚡ **Quantità richiesta:** ${kwhAmount} KWH\n`;
+        
+        if (calculation.appliedMinimum) {
+            message += `🎯 **Minimo applicato:** ${calculation.kwhUsed} KWH\n`;
+        }
+        
+        message += `💰 **Prezzo:** ${calculation.pricePerKwh}€/KWH\n`;
+        message += `💵 **Totale da pagare:** €${calculation.totalAmount.toFixed(2)}\n\n`;
+        
+        if (announcement.pricingType === 'graduated') {
+            message += `📊 **Tipo prezzo:** Graduato\n`;
         } else {
-            return `❌ *DISCREPANZA RILEVATA*
+            message += `📊 **Tipo prezzo:** Fisso\n`;
+        }
+        
+        message += `📍 **Posizione:** ${announcement.location}\n`;
+        message += `📞 **Contatti:** ${announcement.contactInfo}\n\n`;
+        
+        message += `Confermi l'acquisto?`;
+        
+        return message;
+    }
 
-📷 I dati nella foto non corrispondono ai KWH dichiarati
-💡 KWH dichiarati: *${validationResult.declaredKwh}*
-🔍 KWH rilevati dal bot: *${validationResult.detectedKwh || 'Non rilevato'}*
+    // Messaggi di stato
+    static getStatusText(status) {
+        const statusMap = {
+            'pending': '⏳ In attesa di conferma',
+            'confirmed': '✅ Confermata dal venditore',
+            'completed': '🎉 Completata con successo',
+            'cancelled': '❌ Annullata'
+        };
+        return statusMap[status] || status;
+    }
 
-Motivazione: ${validationResult.reason}
+    static getStatusEmoji(status) {
+        const emojiMap = {
+            'pending': '⏳',
+            'confirmed': '✅',
+            'completed': '🎉',
+            'cancelled': '❌'
+        };
+        return emojiMap[status] || '❓';
+    }
 
-Ricontrolla e riprova.`;
+    // Messaggi di errore
+    static get ERROR_MESSAGES() {
+        return {
+            INVALID_AMOUNT: '❌ Quantità non valida. Inserisci un numero tra 1 e 1000 KWH.',
+            INVALID_PRICE: '❌ Prezzo non valido. Inserisci un numero tra 0.01 e 10.00 €/KWH.',
+            INVALID_TIER_FORMAT: '❌ Formato non valido. Usa: `limite_kwh prezzo`\n\nEsempio: `30 0.45`',
+            INVALID_TIER_LIMIT: '❌ Il limite deve essere maggiore del precedente.',
+            INVALID_MINIMUM: '❌ KWH minimi non validi. Inserisci un numero tra 1 e 1000.',
+            ANNOUNCEMENT_NOT_FOUND: '❌ Annuncio non trovato o non più disponibile.',
+            TRANSACTION_NOT_FOUND: '❌ Transazione non trovata.',
+            UNAUTHORIZED: '❌ Non sei autorizzato per questa operazione.',
+            CANNOT_BUY_OWN: '❌ Non puoi acquistare dalla tua stessa offerta!',
+            GENERIC_ERROR: '❌ Si è verificato un errore. Riprova tra qualche minuto.'
+        };
+    }
+
+    // Messaggi informativi
+    static get INFO_MESSAGES() {
+        return {
+            PRICING_EXPLANATION: this.formatGraduatedPricingExplanation(),
+            MINIMUM_EXPLANATION: this.formatMinimumGuaranteeExplanation(),
+            PROCESS_HELP: `📋 **COME FUNZIONA**
+
+**Per Venditori:**
+1. Crea annuncio con i tuoi prezzi
+2. Ricevi richieste di acquisto
+3. Conferma o rifiuta le richieste
+4. Fornisci accesso alla ricarica
+5. Ricevi il pagamento
+6. Lascia feedback
+
+**Per Acquirenti:**
+1. Cerca offerte nella tua zona
+2. Invia richiesta di acquisto
+3. Attendi conferma del venditore
+4. Effettua la ricarica
+5. Paga come concordato
+6. Lascia feedback`,
+
+            SAFETY_TIPS: `🛡️ **CONSIGLI DI SICUREZZA**
+
+• Verifica sempre l'identità del venditore
+• Controlla le recensioni prima di acquistare
+• Paga solo dopo aver ricevuto l'energia
+• Usa metodi di pagamento tracciabili
+• Segnala comportamenti sospetti
+• Non condividere dati personali sensibili`
+        };
+    }
+
+    // Messaggi per feedback e recensioni
+    static formatFeedbackRequest(transaction, userRole) {
+        const otherUserRole = userRole === 'buyer' ? 'venditore' : 'acquirente';
+        
+        return `⭐ **LASCIA UNA RECENSIONE**
+
+Come è andata la transazione con questo ${otherUserRole}?
+
+La tua recensione aiuta altri utenti a scegliere in sicurezza.
+
+**Transazione:** ${transaction._id.toString().slice(-8)}
+**Importo:** €${transaction.totalAmount.toFixed(2)}
+**KWH:** ${transaction.kwhAmount}
+
+Seleziona il tuo voto:`;
+    }
+
+    // Messaggi per notifiche
+    static formatNotification(type, data) {
+        switch (type) {
+            case 'new_request':
+                return `🔔 **NUOVA RICHIESTA**\n\nHai ricevuto una richiesta di acquisto per ${data.kwhAmount} KWH!\n\n💰 Guadagno: €${data.totalAmount.toFixed(2)}`;
+                
+            case 'request_confirmed':
+                return `✅ **RICHIESTA CONFERMATA**\n\nIl venditore ha accettato la tua richiesta!\n\n⚡ KWH: ${data.kwhAmount}\n💰 Totale: €${data.totalAmount.toFixed(2)}`;
+                
+            case 'transaction_completed':
+                return `🎉 **TRANSAZIONE COMPLETATA**\n\nComplimenti! La transazione è stata completata con successo.\n\n💰 Importo: €${data.totalAmount.toFixed(2)}`;
+                
+            default:
+                return `🔔 **NOTIFICA**\n\n${data.message}`;
         }
     }
-
-    static formatPaymentRequest(amount, paymentMethods) {
-        return `💳 *PROCEDI CON IL PAGAMENTO*
-
-💰 Importo da pagare: *€${amount.toFixed(2)}*
-💳 Metodi accettati: *${paymentMethods}*
-
-Il venditore ti contatterà in privato per i dettagli del pagamento.
-
-Hai completato il pagamento?`;
-    }
-
-    static formatPaymentConfirmationRequest(amount, buyerUsername) {
-        return `💳 *RICHIESTA CONFERMA PAGAMENTO*
-
-@${buyerUsername} dichiara di aver pagato *€${amount.toFixed(2)}*
-
-Hai ricevuto il pagamento?`;
-    }
-
-    static get TRANSACTION_COMPLETED() {
-        return `🎉 *TRANSAZIONE COMPLETATA CON SUCCESSO!*
-
-La transazione è stata finalizzata.
-Ora è il momento dei feedback reciproci!
-
-⭐ Il feedback aiuta la community a crescere in sicurezza.`;
-    }
-
-    static get FEEDBACK_REQUEST() {
-        return `🌟 *LASCIA UN FEEDBACK*
-
-Come è andata la transazione?
-
-⭐ Il tuo feedback aiuta altri utenti a scegliere venditori affidabili.`;
-    }
-
-    static get NEGATIVE_FEEDBACK_REASON() {
-        return `😔 *Ci dispiace per l'esperienza negativa.*
-
-Puoi motivare brevemente il problema?
-
-Questo aiuterà altri utenti e permetterà al venditore di migliorare.
-
-💡 *Scrivi una breve descrizione* del problema riscontrato.`;
-    }
-
-    static formatUserStats(userStats) {
-        const badge = userStats.sellerBadge ? 
-            `🏆 Status: *${userStats.sellerBadge === 'TOP' ? 'VENDITORE TOP' : 'VENDITORE AFFIDABILE'}*` : '';
-
-        return `📊 *LE TUE STATISTICHE*
-
-👤 @${userStats.username}
-🌟 Rating: *${userStats.averageRating}/5* (${userStats.positivePercentage}% positivi)
-${badge}
-
-📈 *Riepilogo:*
-✅ Transazioni positive: *${userStats.positiveCount || 0}*
-⚠️ Transazioni neutre: *${userStats.totalFeedback - userStats.positiveCount - (userStats.negativeCount || 0)}*
-❌ Transazioni negative: *${userStats.negativeCount || 0}*
-💰 Volume totale: *${userStats.totalKwhSold || 0} KWH venduti*
-
-${userStats.sellerBadge === 'TOP' ? '🌟 *Complimenti! Sei un VENDITORE TOP!* (>95% feedback positivi)' : 
-  userStats.sellerBadge === 'AFFIDABILE' ? '✅ *Sei un VENDITORE AFFIDABILE!* (>90% feedback positivi)' : 
-  '💪 *Continua così per diventare un venditore affidabile!*'}`;
-    }
-
-    static formatAdminAlert(transactionId, issue, reportedBy) {
-        return `🚨 *RICHIESTA ARBITRAGGIO*
-
-Caso ID: *${transactionId}*
-Problema: *${issue}*
-Segnalato da: @${reportedBy}
-
-⏰ Richiede intervento admin immediato.`;
-    }
-
-    static get ADMIN_HELP_GUIDE() {
-        return `👨‍⚖️ *GUIDA ADMIN BOT KWH*
-
-🔧 *Comandi disponibili:*
-• /admin - Dashboard amministratore
-• /stats - Statistiche generali
-• /disputes - Dispute aperte
-• /users - Gestione utenti
-
-⚖️ *Arbitraggio:*
-Le decisioni admin sono definitive e vengono notificate a entrambe le parti.
-
-📊 *Monitoraggio:*
-Controlla regolarmente transazioni pending e problemi segnalati.`;
-    }
-
-    static ERROR_MESSAGES = {
-        INVALID_PRICE: '❌ Prezzo non valido. Inserisci un numero (es: 0.35)',
-        INVALID_DATE: '❌ Data non valida. Usa il formato GG/MM/AAAA HH:MM',
-        IMAGE_TOO_LARGE: '❌ Immagine troppo grande. Massimo 5MB.',
-        IMAGE_PROCESSING_ERROR: '❌ Errore nell\'elaborazione dell\'immagine. Riprova.',
-        INVALID_KWH: '❌ Valore KWH non valido. Inserisci un numero (es: 35.2)',
-        TRANSACTION_NOT_FOUND: '❌ Transazione non trovata.',
-        UNAUTHORIZED: '❌ Non sei autorizzato per questa azione.',
-        GENERIC_ERROR: '❌ Si è verificato un errore. Riprova o contatta l\'admin.'
-    };
 }
 
 module.exports = Messages;
