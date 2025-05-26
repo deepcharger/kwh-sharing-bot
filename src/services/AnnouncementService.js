@@ -1,65 +1,31 @@
-const mongoose = require('mongoose');
-const AnnouncementModel = require('../models/AnnouncementModel');
-const User = require('../models/UserModel');
-const logger = require('../utils/logger');
-
 class AnnouncementService {
-    static async createAnnouncement(data) {
+    constructor(db) {
+        this.db = db;
+        this.collection = db.getCollection('announcements');
+    }
+
+    async createAnnouncement(data) {
         try {
-            // Validazione dati obbligatori
+            // Validazione dati
             if (!data.userId || !data.location || !data.description) {
                 throw new Error('Dati obbligatori mancanti');
             }
 
             // Validazione pricing
-            if (!data.pricingType || !['fixed', 'graduated'].includes(data.pricingType)) {
-                throw new Error('Tipo di prezzo non valido');
+            const errors = this.validatePricingData(data);
+            if (errors.length > 0) {
+                throw new Error(errors.join(', '));
             }
 
-            if (data.pricingType === 'fixed' && (!data.basePrice || data.basePrice <= 0)) {
-                throw new Error('Prezzo fisso non valido');
-            }
-
-            if (data.pricingType === 'graduated') {
-                if (!data.pricingTiers || !Array.isArray(data.pricingTiers) || data.pricingTiers.length === 0) {
-                    throw new Error('Fasce di prezzo non valide');
-                }
-
-                // Validazione fasce
-                for (let i = 0; i < data.pricingTiers.length; i++) {
-                    const tier = data.pricingTiers[i];
-                    if (!tier.price || tier.price <= 0) {
-                        throw new Error(`Prezzo fascia ${i + 1} non valido`);
-                    }
-                    if (i < data.pricingTiers.length - 1 && (!tier.limit || tier.limit <= 0)) {
-                        throw new Error(`Limite fascia ${i + 1} non valido`);
-                    }
-                    if (i === data.pricingTiers.length - 1 && tier.limit !== null) {
-                        throw new Error('L\'ultima fascia deve avere limite null');
-                    }
-                }
-
-                // Ordinamento fasce per limite crescente
-                data.pricingTiers.sort((a, b) => {
-                    if (a.limit === null) return 1;
-                    if (b.limit === null) return -1;
-                    return a.limit - b.limit;
-                });
-            }
-
-            // Validazione KWH minimi
-            if (data.minimumKwh && (isNaN(data.minimumKwh) || data.minimumKwh <= 0)) {
-                throw new Error('KWH minimi non validi');
-            }
-
-            const announcement = new AnnouncementModel({
+            const announcement = {
+                announcementId: `A${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                 userId: data.userId,
                 location: data.location,
                 description: data.description,
                 availability: data.availability || 'Sempre disponibile',
                 contactInfo: data.contactInfo,
                 
-                // Nuovo sistema prezzi
+                // Sistema prezzi
                 pricingType: data.pricingType,
                 basePrice: data.pricingType === 'fixed' ? data.basePrice : undefined,
                 pricingTiers: data.pricingType === 'graduated' ? data.pricingTiers : undefined,
@@ -68,225 +34,264 @@ class AnnouncementService {
                 isActive: true,
                 createdAt: new Date(),
                 updatedAt: new Date()
-            });
+            };
 
-            await announcement.save();
-            logger.info(`Annuncio creato con ID: ${announcement._id}`);
+            const result = await this.collection.insertOne(announcement);
+            announcement._id = result.insertedId;
+            
+            console.log(`Annuncio creato: ${announcement.announcementId}`);
             return announcement;
+
         } catch (error) {
-            logger.error('Errore nella creazione dell\'annuncio:', error);
+            console.error('Errore nella creazione dell\'annuncio:', error);
             throw error;
         }
     }
 
-    static async getActiveAnnouncements(limit = 10, skip = 0) {
+    async getActiveAnnouncements(limit = 10) {
         try {
-            const announcements = await AnnouncementModel
+            const announcements = await this.collection
                 .find({ isActive: true })
-                .populate('userId', 'username firstName lastName')
                 .sort({ createdAt: -1 })
                 .limit(limit)
-                .skip(skip);
+                .toArray();
+
+            // Popola user info
+            const userIds = [...new Set(announcements.map(a => a.userId))];
+            const users = await this.db.getCollection('users')
+                .find({ userId: { $in: userIds } })
+                .toArray();
+            
+            const userMap = users.reduce((map, user) => {
+                map[user.userId] = user;
+                return map;
+            }, {});
+
+            announcements.forEach(ann => {
+                ann.userId = userMap[ann.userId] || { userId: ann.userId };
+            });
 
             return announcements;
         } catch (error) {
-            logger.error('Errore nel recupero degli annunci:', error);
+            console.error('Errore nel recupero degli annunci:', error);
             throw error;
         }
     }
 
-    static async getAnnouncementById(id) {
+    async getAnnouncement(announcementId) {
         try {
-            if (!mongoose.Types.ObjectId.isValid(id)) {
-                throw new Error('ID annuncio non valido');
+            const announcement = await this.collection.findOne({ 
+                announcementId: announcementId 
+            });
+            
+            if (announcement) {
+                // Popola user info
+                const user = await this.db.getCollection('users').findOne({ 
+                    userId: announcement.userId 
+                });
+                announcement.userId = user || { userId: announcement.userId };
             }
-
-            const announcement = await AnnouncementModel
-                .findById(id)
-                .populate('userId', 'username firstName lastName');
-
+            
             return announcement;
         } catch (error) {
-            logger.error('Errore nel recupero dell\'annuncio:', error);
+            console.error('Errore nel recupero dell\'annuncio:', error);
             throw error;
         }
     }
 
-    static async getUserAnnouncements(userId) {
+    async getUserAnnouncements(userId) {
         try {
-            const announcements = await AnnouncementModel
-                .find({ userId })
-                .sort({ createdAt: -1 });
-
-            return announcements;
+            return await this.collection
+                .find({ userId: userId })
+                .sort({ createdAt: -1 })
+                .toArray();
         } catch (error) {
-            logger.error('Errore nel recupero degli annunci utente:', error);
+            console.error('Errore nel recupero annunci utente:', error);
             throw error;
         }
     }
 
-    static async updateAnnouncement(id, data) {
+    async deleteAnnouncement(announcementId, userId) {
         try {
-            if (!mongoose.Types.ObjectId.isValid(id)) {
-                throw new Error('ID annuncio non valido');
-            }
-
-            // Validazione pricing se modificato
-            if (data.pricingType) {
-                if (!['fixed', 'graduated'].includes(data.pricingType)) {
-                    throw new Error('Tipo di prezzo non valido');
+            const result = await this.collection.updateOne(
+                { announcementId: announcementId, userId: userId },
+                { 
+                    $set: { 
+                        isActive: false, 
+                        updatedAt: new Date() 
+                    } 
                 }
-
-                if (data.pricingType === 'fixed' && (!data.basePrice || data.basePrice <= 0)) {
-                    throw new Error('Prezzo fisso non valido');
-                }
-
-                if (data.pricingType === 'graduated') {
-                    if (!data.pricingTiers || !Array.isArray(data.pricingTiers) || data.pricingTiers.length === 0) {
-                        throw new Error('Fasce di prezzo non valide');
-                    }
-                }
-            }
-
-            const announcement = await AnnouncementModel.findByIdAndUpdate(
-                id,
-                { ...data, updatedAt: new Date() },
-                { new: true }
             );
 
-            if (!announcement) {
-                throw new Error('Annuncio non trovato');
-            }
-
-            logger.info(`Annuncio aggiornato: ${id}`);
-            return announcement;
+            return result.modifiedCount > 0;
         } catch (error) {
-            logger.error('Errore nell\'aggiornamento dell\'annuncio:', error);
+            console.error('Errore nell\'eliminazione dell\'annuncio:', error);
             throw error;
         }
     }
 
-    static async deleteAnnouncement(id, userId) {
+    async getAnnouncementStats() {
         try {
-            if (!mongoose.Types.ObjectId.isValid(id)) {
-                throw new Error('ID annuncio non valido');
-            }
-
-            const announcement = await AnnouncementModel.findOneAndUpdate(
-                { _id: id, userId },
-                { isActive: false, updatedAt: new Date() },
-                { new: true }
-            );
-
-            if (!announcement) {
-                throw new Error('Annuncio non trovato o non autorizzato');
-            }
-
-            logger.info(`Annuncio eliminato: ${id}`);
-            return announcement;
-        } catch (error) {
-            logger.error('Errore nell\'eliminazione dell\'annuncio:', error);
-            throw error;
-        }
-    }
-
-    static async searchAnnouncements(filters) {
-        try {
-            const query = { isActive: true };
-
-            if (filters.location) {
-                query.location = { $regex: filters.location, $options: 'i' };
-            }
-
-            if (filters.maxPrice) {
-                // Per la ricerca, consideriamo il prezzo base o il primo tier
-                query.$or = [
-                    { pricingType: 'fixed', basePrice: { $lte: filters.maxPrice } },
-                    { 
-                        pricingType: 'graduated', 
-                        'pricingTiers.0.price': { $lte: filters.maxPrice } 
-                    }
-                ];
-            }
-
-            const announcements = await AnnouncementModel
-                .find(query)
-                .populate('userId', 'username firstName lastName')
-                .sort({ createdAt: -1 });
-
-            return announcements;
-        } catch (error) {
-            logger.error('Errore nella ricerca degli annunci:', error);
-            throw error;
-        }
-    }
-
-    // Nuova funzione per calcolare il prezzo basato sui KWH
-    static calculatePrice(announcement, kwhAmount) {
-        try {
-            if (!announcement || !kwhAmount || kwhAmount <= 0) {
-                throw new Error('Parametri non validi per il calcolo del prezzo');
-            }
-
-            // Applica minimo se presente
-            const finalKwh = Math.max(kwhAmount, announcement.minimumKwh || 0);
-
-            if (announcement.pricingType === 'fixed') {
-                return {
-                    totalAmount: finalKwh * announcement.basePrice,
-                    kwhUsed: finalKwh,
-                    pricePerKwh: announcement.basePrice,
-                    appliedMinimum: finalKwh > kwhAmount
-                };
-            }
-
-            if (announcement.pricingType === 'graduated') {
-                // Trova la fascia appropriata
-                let applicableTier = announcement.pricingTiers[announcement.pricingTiers.length - 1]; // Default ultima fascia
-                
-                for (let tier of announcement.pricingTiers) {
-                    if (tier.limit === null || finalKwh <= tier.limit) {
-                        applicableTier = tier;
-                        break;
-                    }
-                }
-
-                return {
-                    totalAmount: finalKwh * applicableTier.price,
-                    kwhUsed: finalKwh,
-                    pricePerKwh: applicableTier.price,
-                    appliedTier: applicableTier,
-                    appliedMinimum: finalKwh > kwhAmount
-                };
-            }
-
-            throw new Error('Tipo di prezzo non supportato');
-        } catch (error) {
-            logger.error('Errore nel calcolo del prezzo:', error);
-            throw error;
-        }
-    }
-
-    // Funzione per ottenere statistiche annunci
-    static async getAnnouncementStats(userId) {
-        try {
-            const stats = await AnnouncementModel.aggregate([
-                { $match: { userId: new mongoose.Types.ObjectId(userId) } },
+            const stats = await this.collection.aggregate([
+                { $match: { isActive: true } },
                 {
                     $group: {
                         _id: null,
-                        total: { $sum: 1 },
-                        active: { $sum: { $cond: ['$isActive', 1, 0] } },
-                        inactive: { $sum: { $cond: ['$isActive', 0, 1] } }
+                        totalActive: { $sum: 1 },
+                        avgPrice: { 
+                            $avg: {
+                                $cond: [
+                                    { $eq: ['$pricingType', 'fixed'] },
+                                    '$basePrice',
+                                    { $arrayElemAt: ['$pricingTiers.price', 0] }
+                                ]
+                            }
+                        },
+                        minPrice: { 
+                            $min: {
+                                $cond: [
+                                    { $eq: ['$pricingType', 'fixed'] },
+                                    '$basePrice',
+                                    { $arrayElemAt: ['$pricingTiers.price', 0] }
+                                ]
+                            }
+                        },
+                        maxPrice: { 
+                            $max: {
+                                $cond: [
+                                    { $eq: ['$pricingType', 'fixed'] },
+                                    '$basePrice',
+                                    { $arrayElemAt: ['$pricingTiers.price', -1] }
+                                ]
+                            }
+                        }
                     }
                 }
-            ]);
+            ]).toArray();
 
-            return stats[0] || { total: 0, active: 0, inactive: 0 };
+            return stats[0] || {
+                totalActive: 0,
+                avgPrice: 0,
+                minPrice: 0,
+                maxPrice: 0
+            };
         } catch (error) {
-            logger.error('Errore nel calcolo delle statistiche:', error);
+            console.error('Errore nel calcolo delle statistiche:', error);
             throw error;
         }
+    }
+
+    validatePricingData(data) {
+        const errors = [];
+        
+        if (!data.pricingType || !['fixed', 'graduated'].includes(data.pricingType)) {
+            errors.push('Tipo di prezzo non valido');
+        }
+        
+        if (data.pricingType === 'fixed') {
+            if (!data.basePrice || data.basePrice <= 0) {
+                errors.push('Prezzo fisso deve essere maggiore di 0');
+            }
+        }
+        
+        if (data.pricingType === 'graduated') {
+            if (!data.pricingTiers || !Array.isArray(data.pricingTiers) || data.pricingTiers.length === 0) {
+                errors.push('Almeno una fascia di prezzo è richiesta');
+            } else {
+                // Validazione fasce
+                for (let i = 0; i < data.pricingTiers.length; i++) {
+                    const tier = data.pricingTiers[i];
+                    
+                    if (!tier.price || tier.price <= 0) {
+                        errors.push(`Prezzo fascia ${i + 1} deve essere maggiore di 0`);
+                    }
+                    
+                    if (i < data.pricingTiers.length - 1) {
+                        if (!tier.limit || tier.limit <= 0) {
+                            errors.push(`Limite fascia ${i + 1} deve essere maggiore di 0`);
+                        }
+                        
+                        if (i > 0 && tier.limit <= data.pricingTiers[i-1].limit) {
+                            errors.push(`Limite fascia ${i + 1} deve essere maggiore del precedente`);
+                        }
+                    }
+                    
+                    if (i === data.pricingTiers.length - 1 && tier.limit !== null) {
+                        errors.push('L\'ultima fascia deve avere limite null');
+                    }
+                }
+            }
+        }
+        
+        if (data.minimumKwh && (isNaN(data.minimumKwh) || data.minimumKwh <= 0)) {
+            errors.push('KWH minimi devono essere maggiori di 0');
+        }
+        
+        return errors;
+    }
+
+    // Metodo helper per formattare annunci
+    async formatAnnouncementMessage(announcement, userStats) {
+        let message = `🔋 **OFFERTA ENERGIA**\n\n`;
+        
+        const user = announcement.userId;
+        const username = user.username || user.firstName || 'Utente';
+        message += `👤 **Venditore:** @${username}\n`;
+        
+        // Badge venditore
+        if (userStats && userStats.totalFeedback >= 5) {
+            if (userStats.positivePercentage >= 95) {
+                message += `🌟 **VENDITORE TOP** (${userStats.positivePercentage}% positivi)\n`;
+            } else if (userStats.positivePercentage >= 90) {
+                message += `✅ **VENDITORE AFFIDABILE** (${userStats.positivePercentage}% positivi)\n`;
+            }
+        }
+        
+        message += `\n📍 **Posizione:** ${announcement.location}\n`;
+        message += `📝 **Descrizione:** ${announcement.description}\n`;
+        message += `⏰ **Disponibilità:** ${announcement.availability}\n`;
+        
+        // Pricing
+        message += `\n${this.formatPricing(announcement)}\n`;
+        
+        if (announcement.contactInfo) {
+            message += `📞 **Contatti:** ${announcement.contactInfo}\n`;
+        }
+        
+        return message;
+    }
+
+    formatPricing(announcement) {
+        if (announcement.pricingType === 'fixed') {
+            let text = `💰 **Prezzo:** ${announcement.basePrice}€/KWH`;
+            if (announcement.minimumKwh) {
+                text += `\n🎯 **Minimo garantito:** ${announcement.minimumKwh} KWH`;
+            }
+            return text;
+        }
+        
+        if (announcement.pricingType === 'graduated') {
+            let text = `📊 **Prezzi graduati:**\n`;
+            
+            for (let i = 0; i < announcement.pricingTiers.length; i++) {
+                const tier = announcement.pricingTiers[i];
+                const prevLimit = i > 0 ? announcement.pricingTiers[i-1].limit : 0;
+                
+                if (tier.limit === null) {
+                    text += `• Oltre ${prevLimit} KWH: TUTTO a ${tier.price}€/KWH\n`;
+                } else {
+                    text += `• ${prevLimit + 1}-${tier.limit} KWH: TUTTO a ${tier.price}€/KWH\n`;
+                }
+            }
+            
+            if (announcement.minimumKwh) {
+                text += `🎯 **Minimo garantito:** ${announcement.minimumKwh} KWH`;
+            }
+            
+            return text.trim();
+        }
+        
+        return 'Prezzo non configurato';
     }
 }
 
