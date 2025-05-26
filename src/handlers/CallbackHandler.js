@@ -1106,7 +1106,24 @@ class CallbackHandler {
             await this.bot.chatCleaner.enterScene(ctx, 'transactionScene');
         });
 
-        this.bot.bot.action('charging_failed', async (ctx) => {
+        this.bot.bot.action('charging_finished', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            // Gestisce il pulsante "Ho terminato la ricarica"
+            await ctx.editMessageText(
+                '📸 **INVIA FOTO DEL DISPLAY**\n\n' +
+                'Scatta una foto chiara del display che mostri i KWH erogati.\n\n' +
+                '📱 Suggerimenti per la foto:\n' +
+                '• Inquadra bene il display\n' +
+                '• Assicurati che i numeri siano leggibili\n' +
+                '• Evita riflessi sullo schermo',
+                { parse_mode: 'Markdown' }
+            );
+            
+            // Imposta lo stato per aspettare la foto
+            ctx.session.waitingFor = 'display_photo';
+            ctx.session.waitingForDisplayPhoto = true;
+        });
             await ctx.answerCbQuery();
             
             const messageText = ctx.callbackQuery.message.text;
