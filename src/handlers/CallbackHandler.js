@@ -16,7 +16,7 @@ class CallbackHandler {
         // Transaction management callbacks
         this.setupTransactionCallbacks();
         
-        // Payment callbacks - FIX PRINCIPALE
+        // Payment callbacks
         this.setupPaymentCallbacks();
         
         // Announcement callbacks
@@ -30,10 +30,13 @@ class CallbackHandler {
         
         // Help callbacks
         this.setupHelpCallbacks();
+        
+        // Buy energy callbacks
+        this.setupBuyEnergyCallbacks();
     }
 
     setupNavigationCallbacks() {
-        // FIX: Menu principale con pulizia completa
+        // Menu principale con pulizia completa
         this.bot.bot.action('back_to_main', async (ctx) => {
             await ctx.answerCbQuery();
             
@@ -71,7 +74,6 @@ class CallbackHandler {
             
             message += `✅ **Completate:** ${completed.length}`;
             
-            // FIX: Usa editOrReplace per mantenere pulita la chat
             await this.bot.chatCleaner.editOrReplace(ctx, message, {
                 parse_mode: 'Markdown',
                 reply_markup: Keyboards.getTransactionsKeyboard(pending, completed).reply_markup,
@@ -85,7 +87,6 @@ class CallbackHandler {
             const announcements = await this.bot.announcementService.getUserAnnouncements(userId);
             
             if (announcements.length === 0) {
-                // Messaggio temporaneo che si auto-elimina
                 await this.bot.chatCleaner.sendTemporaryMessage(
                     ctx, 
                     '📭 Non hai ancora pubblicato annunci.',
@@ -93,7 +94,6 @@ class CallbackHandler {
                     3000
                 );
                 
-                // Torna al menu dopo 3 secondi
                 setTimeout(async () => {
                     await this.bot.chatCleaner.resetUserChat(ctx);
                 }, 3000);
@@ -103,7 +103,7 @@ class CallbackHandler {
             let message = '📊 **I TUOI ANNUNCI ATTIVI:**\n\n';
             for (const ann of announcements) {
                 message += `🆔 ${ann.announcementId}\n`;
-                message += `💰 ${ann.price}€/KWH\n`;
+                message += `💰 ${ann.price || ann.basePrice}€/KWH\n`;
                 message += `📅 Pubblicato: ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
             }
             
@@ -292,7 +292,7 @@ class CallbackHandler {
             
             let message = '📋 **ANNUNCI ATTIVI:**\n\n';
             for (const ann of activeAnnouncements.slice(0, 10)) {
-                message += `💰 ${ann.price}€/KWH - ${ann.zones}\n`;
+                message += `💰 ${ann.price || ann.basePrice}€/KWH - ${ann.zones}\n`;
                 message += `📅 ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
             }
             
@@ -326,7 +326,6 @@ class CallbackHandler {
             );
 
             try {
-                // Messaggio importante per il buyer - mantieni persistente
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                     `✅ *Richiesta accettata!*\n\n` +
@@ -339,7 +338,6 @@ class CallbackHandler {
                 console.error('Error notifying buyer:', error);
             }
 
-            // Messaggio di conferma temporaneo per il seller
             await this.bot.chatCleaner.sendConfirmationMessage(ctx,
                 '✅ Richiesta accettata! L\'acquirente è stato notificato.\n\n' +
                 'Riceverai una notifica quando sarà il momento di attivare la ricarica.'
@@ -408,7 +406,7 @@ class CallbackHandler {
                         parse_mode: 'Markdown',
                         disable_web_page_preview: true 
                     },
-                    10000 // Auto-elimina dopo 10 secondi
+                    10000
                 );
             } else {
                 await this.bot.chatCleaner.sendTemporaryMessage(ctx,
@@ -471,7 +469,7 @@ class CallbackHandler {
     }
 
     setupPaymentCallbacks() {
-        // FIX PRINCIPALE: Payment confirmation con pulizia migliorata
+        // Payment confirmation con pulizia migliorata
         this.bot.bot.action('payment_completed', async (ctx) => {
             await ctx.answerCbQuery();
             
@@ -613,7 +611,6 @@ class CallbackHandler {
             );
 
             try {
-                // Messaggi importanti - mantieni persistenti
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                     Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST + 
@@ -730,7 +727,7 @@ class CallbackHandler {
             
             const announcement = await this.bot.announcementService.getAnnouncement(transaction.announcementId);
             const amount = announcement && transaction.declaredKwh ? 
-                (transaction.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                (transaction.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
             
             // Salva l'ID nella sessione
             ctx.session.currentTransactionId = transactionId;
@@ -821,7 +818,6 @@ class CallbackHandler {
                 
                 await this.bot.chatCleaner.sendConfirmationMessage(ctx, '✅ Annuncio eliminato con successo.');
                 
-                // Torna al menu dopo 3 secondi
                 setTimeout(async () => {
                     await this.bot.chatCleaner.resetUserChat(ctx);
                 }, 3000);
@@ -1056,7 +1052,7 @@ class CallbackHandler {
 
             try {
                 const amount = announcement && transaction.declaredKwh ? 
-                    (transaction.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                    (transaction.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
                 
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.buyerId } },
@@ -1073,7 +1069,7 @@ class CallbackHandler {
                     }
                 );
 
-                // FIX: Salva l'ID transazione nella sessione per il pagamento
+                // Salva l'ID transazione nella sessione per il pagamento
                 ctx.session.currentTransactionId = transaction.transactionId;
 
             } catch (error) {
@@ -1153,7 +1149,6 @@ class CallbackHandler {
 
                 delete ctx.session.completedTransactionId;
                 
-                // Torna al menu dopo 3 secondi
                 setTimeout(async () => {
                     await this.bot.chatCleaner.resetUserChat(ctx);
                 }, 3000);
@@ -1263,7 +1258,133 @@ class CallbackHandler {
         });
     }
 
-    // Helper method for payment confirmation processing - FIX PRINCIPALE
+    setupBuyEnergyCallbacks() {
+        // Gestione acquisto energia
+        this.bot.bot.action('buy_energy', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const announcements = await this.bot.announcementService.getActiveAnnouncements(20);
+            
+            if (announcements.length === 0) {
+                await ctx.editMessageText(
+                    '📭 **NESSUNA OFFERTA DISPONIBILE**\n\nNon ci sono offerte al momento.',
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '🔋 Vendi tu energia', callback_data: 'sell_energy' }],
+                                [{ text: '🏠 Menu principale', callback_data: 'back_to_main' }]
+                            ]
+                        }
+                    }
+                );
+                return;
+            }
+
+            let message = '🛒 **OFFERTE DISPONIBILI**\n\n';
+            const keyboard = [];
+
+            for (const ann of announcements) {
+                // Salta annunci propri
+                if (ann.userId === ctx.from.id || (ann.userId.userId && ann.userId.userId === ctx.from.id)) continue;
+
+                // Formatta il testo del bottone con posizione abbreviata
+                let buttonText = `📍 ${ann.location.substring(0, 20)}`;
+                if (ann.location.length > 20) buttonText += '...';
+                
+                if (ann.pricingType === 'fixed') {
+                    buttonText += ` - ${ann.basePrice || ann.price}€/KWH`;
+                } else if (ann.pricingTiers && ann.pricingTiers.length > 0) {
+                    buttonText += ` - da ${ann.pricingTiers[0].price}€`;
+                }
+
+                const shortId = this.bot.transactionCache.TransactionCache.generateShortId(ann.announcementId);
+                this.bot.transactionCache.setAnnouncement(shortId, ann.announcementId);
+
+                keyboard.push([{
+                    text: buttonText,
+                    callback_data: `view_offer_${shortId}`
+                }]);
+            }
+
+            if (keyboard.length === 0) {
+                await ctx.editMessageText(
+                    '📭 **Nessuna offerta disponibile per te**\n\nTutti gli annunci sono tuoi.',
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '🏠 Menu principale', callback_data: 'back_to_main' }]
+                            ]
+                        }
+                    }
+                );
+                return;
+            }
+
+            keyboard.push([{ text: '🏠 Menu principale', callback_data: 'back_to_main' }]);
+
+            message += 'Seleziona un\'offerta per i dettagli:';
+            
+            await ctx.editMessageText(message, {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: keyboard }
+            });
+        });
+
+        // Visualizza dettagli offerta
+        this.bot.bot.action(/^view_offer_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const shortId = ctx.match[1];
+            const announcementId = this.bot.transactionCache.getAnnouncement(shortId);
+            
+            const announcement = await this.bot.announcementService.getAnnouncement(announcementId);
+            if (!announcement) {
+                await ctx.editMessageText('❌ Offerta non trovata.');
+                return;
+            }
+
+            const userStats = await this.bot.userService.getUserStats(announcement.userId);
+            
+            // Usa il metodo che formatta con posizione copiabile
+            let message = await this.bot.announcementService.formatAnnouncementMessage(
+                announcement,
+                userStats
+            );
+
+            // Aggiungi esempi di prezzo
+            const Messages = require('../utils/Messages');
+            message += '\n\n' + Messages.formatPriceExamples(announcement);
+
+            await ctx.editMessageText(message, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🛒 Procedi con l\'acquisto', callback_data: `buy_from_${shortId}` }],
+                        [{ text: '🔙 Torna alle offerte', callback_data: 'buy_energy' }]
+                    ]
+                }
+            });
+        });
+
+        // Inizia processo acquisto
+        this.bot.bot.action(/^buy_from_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const shortId = ctx.match[1];
+            const announcementId = this.bot.transactionCache.getAnnouncement(shortId);
+            
+            ctx.session.announcementId = announcementId;
+            await ctx.scene.enter('contactSellerScene');
+        });
+        
+        // Callback per sell_energy
+        this.bot.bot.action('sell_energy', async (ctx) => {
+            await ctx.answerCbQuery();
+            await ctx.scene.enter('sellAnnouncementScene');
+        });
+    }
+
+    // Helper method for payment confirmation processing
     async processPaymentConfirmation(ctx, transactionId) {
         const transaction = await this.bot.transactionService.getTransaction(transactionId);
         
@@ -1279,7 +1400,7 @@ class CallbackHandler {
         
         const announcement = await this.bot.announcementService.getAnnouncement(transaction.announcementId);
         const amount = announcement && transaction.declaredKwh ? 
-            (transaction.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+            (transaction.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
         
         try {
             // Messaggio importante per il seller - mantieni persistente
