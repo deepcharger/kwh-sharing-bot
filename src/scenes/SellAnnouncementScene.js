@@ -88,9 +88,6 @@ function createSellAnnouncementScene(bot) {
             case 'networks':
                 await handleNetworks(ctx, text);
                 break;
-            case 'location':
-                await handleLocation(ctx, text);
-                break;
             case 'payment_methods':
                 await handlePaymentMethods(ctx, text);
                 break;
@@ -100,27 +97,6 @@ function createSellAnnouncementScene(bot) {
             case 'availability':
                 await handleAvailability(ctx, text);
                 break;
-        }
-    });
-
-    // Gestione posizione inviata tramite Telegram
-    scene.on('location', async (ctx) => {
-        if (ctx.session.step === 'location') {
-            const location = ctx.message.location;
-            const locationText = `Lat: ${location.latitude}, Long: ${location.longitude}`;
-            
-            ctx.session.announcementData.location = locationText;
-            ctx.session.announcementData.coordinates = {
-                latitude: location.latitude,
-                longitude: location.longitude
-            };
-            
-            await ctx.reply(
-                '📍 Posizione GPS ricevuta!\n\n' +
-                'Ora aggiungi una descrizione testuale per aiutare gli acquirenti (es: "Parcheggio Centro Commerciale X, Piano -1"):',
-                { parse_mode: 'Markdown' }
-            );
-            ctx.session.step = 'location_description';
         }
     });
 
@@ -305,6 +281,8 @@ function createSellAnnouncementScene(bot) {
 
     async function handleZones(ctx, zones) {
         ctx.session.announcementData.zones = zones;
+        // Impostiamo una location generica basata sulle zone
+        ctx.session.announcementData.location = zones; // Useremo le zone come location
         
         await ctx.reply(
             '🌐 **RETI DI RICARICA**\n\nQuale rete di ricarica usi?',
@@ -324,7 +302,7 @@ function createSellAnnouncementScene(bot) {
     scene.action('networks_all', async (ctx) => {
         await ctx.answerCbQuery();
         ctx.session.announcementData.networks = 'Tutte le reti';
-        await askLocation(ctx);
+        await askDescription(ctx);
     });
 
     scene.action('networks_specific', async (ctx) => {
@@ -339,60 +317,14 @@ function createSellAnnouncementScene(bot) {
 
     async function handleNetworks(ctx, networks) {
         ctx.session.announcementData.networks = networks;
-        await askLocation(ctx);
+        await askDescription(ctx);
     }
 
-    async function askLocation(ctx) {
-        await ctx.reply(
-            '📍 **POSIZIONE COLONNINA**\n\n' +
-            'Puoi:\n' +
-            '1️⃣ Inviare la posizione GPS usando il pulsante 📎\n' +
-            '2️⃣ Scrivere l\'indirizzo completo\n\n' +
-            'Scegli il metodo che preferisci:',
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    keyboard: [
-                        [{ text: '📍 Invia posizione GPS', request_location: true }],
-                        ['✏️ Scrivi indirizzo']
-                    ],
-                    resize_keyboard: true,
-                    one_time_keyboard: true
-                }
-            }
-        );
-        ctx.session.step = 'location';
-    }
-
-    scene.hears('✏️ Scrivi indirizzo', async (ctx) => {
-        if (ctx.session.step === 'location') {
-            await ctx.reply(
-                '✏️ **INSERISCI INDIRIZZO**\n\n' +
-                'Scrivi l\'indirizzo completo della colonnina\n' +
-                'Esempio: Via Roma 123, Milano',
-                { 
-                    parse_mode: 'Markdown',
-                    reply_markup: { remove_keyboard: true }
-                }
-            );
-        }
-    });
-
-    async function handleLocation(ctx, location) {
-        if (ctx.session.step === 'location_description') {
-            // Aggiungi descrizione alla posizione GPS
-            ctx.session.announcementData.location = `${ctx.session.announcementData.location} - ${location}`;
-            ctx.session.step = null;
-        } else if (location.length < 5 || location.length > 200) {
-            await ctx.reply('❌ La posizione deve essere tra 5 e 200 caratteri. Riprova:');
-            return;
-        } else {
-            ctx.session.announcementData.location = location;
-        }
-        
+    async function askDescription(ctx) {
         await ctx.reply(
             '📝 **DESCRIZIONE** (opzionale)\n\n' +
-            'Vuoi aggiungere una descrizione?',
+            'Vuoi aggiungere una descrizione?\n' +
+            'Puoi specificare dettagli come orari preferiti, tipo di colonnine disponibili, ecc.',
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
@@ -409,7 +341,7 @@ function createSellAnnouncementScene(bot) {
     scene.action('add_description', async (ctx) => {
         await ctx.answerCbQuery();
         await ctx.editMessageText(
-            '📝 Inserisci una breve descrizione (es: Parcheggio coperto, ricarica veloce):',
+            '📝 Inserisci una breve descrizione (es: Disponibile per ricariche veloci, accesso 24/7):',
             { parse_mode: 'Markdown' }
         );
         ctx.session.step = 'description';
@@ -432,7 +364,7 @@ function createSellAnnouncementScene(bot) {
 
     async function askAvailability(ctx) {
         await ctx.reply(
-            '⏰ **DISPONIBILITÀ**\n\nQuando è disponibile la ricarica?',
+            '⏰ **DISPONIBILITÀ**\n\nQuando sei disponibile per attivare le ricariche?',
             {
                 parse_mode: 'Markdown',
                 reply_markup: {
@@ -513,7 +445,6 @@ function createSellAnnouncementScene(bot) {
         preview += `⚡ Corrente: ${data.currentType}\n`;
         preview += `📍 Zone: ${data.zones}\n`;
         preview += `🌐 Reti: ${data.networks}\n`;
-        preview += `📍 Posizione: ${data.location}\n`;
         
         if (data.description) {
             preview += `📝 Descrizione: ${data.description}\n`;
