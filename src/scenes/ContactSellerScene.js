@@ -31,29 +31,82 @@ function createContactSellerScene(bot) {
             step: 'confirm'
         };
 
-        let message = `🛒 **CONTATTA VENDITORE**\n\n`;
+        // Ottieni statistiche del venditore
+        const userStats = await bot.userService.getUserStats(announcement.userId);
+        const seller = await bot.userService.getUser(announcement.userId);
         
-        // IMPORTANTE: Mostra la posizione copiabile anche qui!
-        message += `📍 Posizione: \`${announcement.location}\`\n`;
+        let message = `🛒 **RIEPILOGO ANNUNCIO**\n\n`;
         
-        // Mostra il pricing
+        // Info venditore con badge
+        message += `👤 **Venditore:** @${seller?.username || 'utente'}`;
+        if (userStats && userStats.totalFeedback >= 5) {
+            if (userStats.positivePercentage >= 95) {
+                message += ` 🌟 TOP`;
+            } else if (userStats.positivePercentage >= 90) {
+                message += ` ✅ AFFIDABILE`;
+            }
+        }
+        message += '\n';
+        
+        // Dettagli annuncio
+        message += `🆔 **ID:** \`${announcement.announcementId}\`\n`;
+        
+        // Pricing
         if (announcement.pricingType === 'fixed') {
-            message += `💰 Prezzo: ${announcement.basePrice || announcement.price}€/KWH`;
+            message += `💰 **Prezzo:** ${announcement.basePrice || announcement.price}€/KWH`;
             if (announcement.minimumKwh) {
                 message += ` (min ${announcement.minimumKwh} KWH)`;
             }
         } else if (announcement.pricingTiers && announcement.pricingTiers.length > 0) {
-            message += `💰 Prezzi graduati: `;
-            message += `da ${announcement.pricingTiers[0].price}€/KWH`;
-            if (announcement.pricingTiers.length > 1) {
-                const lastTier = announcement.pricingTiers[announcement.pricingTiers.length - 1];
-                message += ` a ${lastTier.price}€/KWH`;
+            message += `💰 **Prezzi graduati:**\n`;
+            for (let i = 0; i < announcement.pricingTiers.length; i++) {
+                const tier = announcement.pricingTiers[i];
+                const prevLimit = i > 0 ? announcement.pricingTiers[i-1].limit : 0;
+                if (tier.limit) {
+                    message += `  • ${prevLimit + 1}-${tier.limit} KWH: ${tier.price}€/KWH\n`;
+                } else {
+                    message += `  • Oltre ${prevLimit} KWH: ${tier.price}€/KWH\n`;
+                }
+            }
+            if (announcement.minimumKwh) {
+                message += `🎯 **Minimo garantito:** ${announcement.minimumKwh} KWH\n`;
             }
         } else {
-            message += `💰 Prezzo: ${announcement.price || announcement.basePrice}€/KWH`;
+            message += `💰 **Prezzo:** ${announcement.price || announcement.basePrice}€/KWH`;
+        }
+        message += '\n';
+        
+        if (announcement.currentType) {
+            message += `⚡ **Corrente:** ${announcement.currentType}\n`;
         }
         
-        message += '\n\nVuoi procedere con la richiesta di acquisto?';
+        if (announcement.networks) {
+            message += `🌐 **Reti attivabili:** ${announcement.networks}\n`;
+        }
+        
+        if (announcement.availability) {
+            message += `⏰ **Disponibilità:** ${announcement.availability}\n`;
+        }
+        
+        if (announcement.paymentMethods) {
+            message += `💳 **Pagamenti:** ${announcement.paymentMethods}\n`;
+        }
+        
+        if (announcement.description) {
+            message += `📋 **Condizioni:** ${announcement.description}\n`;
+        }
+        
+        // Esempi di costo
+        message += `\n💡 **Esempi di costo:**\n`;
+        const examples = [10, 30, 50];
+        for (const kwh of examples) {
+            const price = announcement.pricingType === 'fixed' 
+                ? (Math.max(kwh, announcement.minimumKwh || 0) * (announcement.basePrice || announcement.price))
+                : this.calculateGraduatedPrice(announcement, kwh);
+            message += `• ${kwh} KWH → €${price.toFixed(2)}\n`;
+        }
+        
+        message += '\n❓ **Vuoi procedere con la richiesta di acquisto?**';
 
         await ctx.reply(message, {
             parse_mode: 'Markdown',
@@ -67,6 +120,25 @@ function createContactSellerScene(bot) {
             }
         });
     });
+
+    scene.calculateGraduatedPrice = function(announcement, kwh) {
+        const finalKwh = Math.max(kwh, announcement.minimumKwh || 0);
+        
+        if (!announcement.pricingTiers || announcement.pricingTiers.length === 0) {
+            return finalKwh * (announcement.price || announcement.basePrice || 0);
+        }
+        
+        let applicableTier = announcement.pricingTiers[announcement.pricingTiers.length - 1];
+        
+        for (let tier of announcement.pricingTiers) {
+            if (tier.limit === null || finalKwh <= tier.limit) {
+                applicableTier = tier;
+                break;
+            }
+        }
+        
+        return finalKwh * applicableTier.price;
+    };
 
     scene.action('confirm_contact', async (ctx) => {
         await ctx.answerCbQuery();
