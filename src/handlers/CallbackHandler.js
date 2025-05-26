@@ -1070,6 +1070,37 @@ class CallbackHandler {
             }
             
             const transactionId = transactionIdMatch[1];
+            const transaction = await this.bot.transactionService.getTransaction(transactionId);
+            
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            // Aggiorna lo stato
+            await this.bot.transactionService.updateTransactionStatus(
+                transactionId,
+                'charging_in_progress'
+            );
+            
+            // Notifica il venditore che la ricarica è in corso
+            try {
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.sellerId } },
+                    `✅ **RICARICA CONFERMATA!**\n\n` +
+                    `L'acquirente @${ctx.from.username || ctx.from.first_name} ha confermato che la ricarica è in corso.\n\n` +
+                    `⚡ La ricarica sta procedendo correttamente.\n` +
+                    `⏳ Attendi che l'acquirente completi la ricarica e invii la foto del display.\n\n` +
+                    `🔍 ID Transazione: \`${transactionId}\``,
+                    {
+                        parse_mode: 'Markdown'
+                    }
+                );
+            } catch (error) {
+                console.error('Error notifying seller:', error);
+            }
+            
+            // Mostra conferma all'acquirente e entra nella scene
             ctx.session.transactionId = transactionId;
             ctx.session.chargingConfirmed = true;
             await this.bot.chatCleaner.enterScene(ctx, 'transactionScene');
