@@ -1,9 +1,8 @@
 const { Scenes, Markup } = require('telegraf');
-const AnnouncementService = require('../services/AnnouncementService');
 const Messages = require('../utils/Messages');
-const logger = require('../utils/logger');
+const Keyboards = require('../utils/Keyboards');
 
-// Crea la scene per vendere energia
+// Questo è il file corretto basato sulla struttura originale del progetto
 const scene = new Scenes.BaseScene('sell_announcement');
 
 // Inizializza la sessione
@@ -20,7 +19,7 @@ scene.enter(async (ctx) => {
             ])
         );
     } catch (error) {
-        logger.error('Errore nell\'ingresso della scene sell:', error);
+        console.error('Errore nell\'ingresso della scene sell:', error);
         await ctx.reply('❌ Errore nel caricamento. Riprova.');
         return ctx.scene.leave();
     }
@@ -42,7 +41,7 @@ scene.action('start_announcement', async (ctx) => {
         );
         ctx.session.step = 'location';
     } catch (error) {
-        logger.error('Errore start_announcement:', error);
+        console.error('Errore start_announcement:', error);
         await ctx.reply('❌ Errore. Riprova.');
     }
 });
@@ -79,7 +78,7 @@ scene.on('text', async (ctx) => {
                 await ctx.reply('❌ Comando non riconosciuto. Usa /help per assistenza.');
         }
     } catch (error) {
-        logger.error('Errore nella gestione del testo:', error);
+        console.error('Errore nella gestione del testo:', error);
         await ctx.reply('❌ Errore nell\'elaborazione. Riprova.');
     }
 });
@@ -203,7 +202,7 @@ scene.action('pricing_type_fixed', async (ctx) => {
         );
         ctx.session.step = 'fixed_price';
     } catch (error) {
-        logger.error('Errore pricing_type_fixed:', error);
+        console.error('Errore pricing_type_fixed:', error);
         await ctx.reply('❌ Errore. Riprova.');
     }
 });
@@ -236,7 +235,7 @@ scene.action('pricing_type_graduated', async (ctx) => {
         );
         ctx.session.step = 'graduated_price';
     } catch (error) {
-        logger.error('Errore pricing_type_graduated:', error);
+        console.error('Errore pricing_type_graduated:', error);
         await ctx.reply('❌ Errore. Riprova.');
     }
 });
@@ -398,7 +397,7 @@ scene.action('add_minimum_yes', async (ctx) => {
         );
         ctx.session.step = 'minimum_kwh';
     } catch (error) {
-        logger.error('Errore add_minimum_yes:', error);
+        console.error('Errore add_minimum_yes:', error);
         await ctx.reply('❌ Errore. Riprova.');
     }
 });
@@ -469,39 +468,84 @@ async function showFinalSummary(ctx) {
     });
 }
 
-// Conferma pubblicazione
+// Conferma pubblicazione - PARTE CRITICA CON POSIZIONE COPIABILE
 scene.action('confirm_publish', async (ctx) => {
     try {
         const data = ctx.session.announcementData;
         data.userId = ctx.from.id;
 
-        // Crea l'annuncio
-        const announcement = await AnnouncementService.createAnnouncement(data);
+        // Ottieni il bot dal contesto della scene
+        const bot = ctx.scene.state.bot;
         
-        await ctx.editMessageText(
-            '🎉 **ANNUNCIO PUBBLICATO CON SUCCESSO!**\n\n' +
-            `📋 ID Annuncio: \`${announcement._id}\`\n\n` +
-            'Il tuo annuncio è ora visibile a tutti gli utenti. ' +
-            'Riceverai notifiche quando qualcuno sarà interessato.',
-            { 
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '👀 Vedi i miei annunci', callback_data: 'view_my_announcements' }],
-                        [{ text: '🏠 Menu Principale', callback_data: 'back_to_main' }]
-                    ]
-                }
-            }
-        );
+        if (!bot) {
+            console.error('Bot non trovato nel contesto della scene');
+            await ctx.reply('❌ Errore di configurazione. Riprova.');
+            return ctx.scene.leave();
+        }
 
+        // Crea l'annuncio
+        const announcement = await bot.announcementService.createAnnouncement(data);
+        
+        // Ottieni statistiche utente per badge
+        const userStats = await bot.userService.getUserStats(ctx.from.id);
+        
+        // IMPORTANTE: Usa il metodo che formatta con posizione copiabile
+        const groupMessage = bot.announcementService.formatAnnouncementForGroup(
+            announcement,
+            userStats
+        );
+        
+        // Pubblica nel topic del gruppo
+        try {
+            const sentMessage = await ctx.telegram.sendMessage(
+                bot.groupId,
+                groupMessage,
+                {
+                    parse_mode: 'Markdown',
+                    message_thread_id: parseInt(bot.topicId),
+                    reply_markup: Keyboards.getContactSellerKeyboard(announcement.announcementId).reply_markup
+                }
+            );
+            
+            // Salva ID messaggio per eventuale eliminazione
+            await bot.announcementService.updateAnnouncement(
+                announcement.announcementId,
+                { messageId: sentMessage.message_id }
+            );
+            
+            await ctx.editMessageText(
+                '🎉 **ANNUNCIO PUBBLICATO CON SUCCESSO!**\n\n' +
+                `📋 ID Annuncio: \`${announcement.announcementId}\`\n\n` +
+                'Il tuo annuncio è ora visibile a tutti gli utenti. ' +
+                'Riceverai notifiche quando qualcuno sarà interessato.',
+                { 
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '👀 Vedi i miei annunci', callback_data: 'view_my_announcements' }],
+                            [{ text: '🏠 Menu Principale', callback_data: 'back_to_main' }]
+                        ]
+                    }
+                }
+            );
+            
+            console.log(`Annuncio creato da utente ${ctx.from.id}: ${announcement.announcementId}`);
+            
+        } catch (error) {
+            console.error('Errore pubblicazione nel gruppo:', error);
+            await ctx.reply(
+                '⚠️ **Annuncio salvato ma non pubblicato nel gruppo**\n\n' +
+                'Contatta l\'amministratore per risolvere il problema.',
+                { parse_mode: 'Markdown' }
+            );
+        }
+        
         // Reset sessione
         ctx.session.announcementData = {};
         ctx.session.step = null;
         
-        logger.info(`Annuncio creato da utente ${ctx.from.id}: ${announcement._id}`);
-        
     } catch (error) {
-        logger.error('Errore nella pubblicazione dell\'annuncio:', error);
+        console.error('Errore nella pubblicazione dell\'annuncio:', error);
         await ctx.reply(
             '❌ **Errore nella pubblicazione**\n\n' +
             'Si è verificato un errore. Riprova tra qualche minuto.',
@@ -620,7 +664,7 @@ scene.action('cancel', async (ctx) => {
         }, 2000);
         
     } catch (error) {
-        logger.error('Errore nell\'annullamento:', error);
+        console.error('Errore nell\'annullamento:', error);
         return ctx.scene.leave();
     }
 });
@@ -632,4 +676,11 @@ scene.leave(async (ctx) => {
     delete ctx.session.step;
 });
 
-module.exports = scene;
+// Funzione helper per creare la scene con il bot iniettato
+function createSellAnnouncementScene(bot) {
+    // Inietta il bot nel contesto della scene
+    scene.state.bot = bot;
+    return scene;
+}
+
+module.exports = { createSellAnnouncementScene };
