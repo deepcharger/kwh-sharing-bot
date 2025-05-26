@@ -96,7 +96,29 @@ class CommandHandler {
 
         // Menu button handlers
         this.bot.bot.hears('🔋 Vendi KWH', async (ctx) => {
-            await this.bot.chatCleaner.enterScene(ctx, 'sellAnnouncementScene');
+            // IMPORTANTE: entra nella scene con il nome corretto
+            await ctx.scene.enter('sellAnnouncementScene');
+        });
+
+        this.bot.bot.hears('🛒 Compra KWH', async (ctx) => {
+            await ctx.reply(
+                '🛒 **COMPRA ENERGIA**\n\n' +
+                'Per comprare energia:\n' +
+                '1. Vai nel gruppo principale\n' +
+                '2. Cerca gli annunci nel topic dedicato\n' +
+                '3. Clicca su "Contatta venditore"\n\n' +
+                '💡 **Suggerimento:** Gli annunci mostrano la posizione copiabile tra \`backtick\` per facilitare la ricerca!\n\n' +
+                'Oppure clicca qui sotto per vedere le offerte disponibili:',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🛒 Vedi offerte disponibili', callback_data: 'buy_energy' }],
+                            [{ text: '🏠 Menu principale', callback_data: 'back_to_main' }]
+                        ]
+                    }
+                }
+            );
         });
 
         this.bot.bot.hears('📊 I miei annunci', async (ctx) => {
@@ -123,7 +145,7 @@ class CommandHandler {
                 message += `💰 Prezzo: `;
                 
                 if (ann.pricingType === 'fixed') {
-                    message += `${ann.basePrice}€/KWH`;
+                    message += `${ann.basePrice || ann.price}€/KWH`;
                 } else {
                     message += `da ${ann.pricingTiers[0].price}€/KWH`;
                 }
@@ -317,9 +339,9 @@ class CommandHandler {
             paymentPending.forEach((tx, index) => {
                 const announcement = announcements[index];
                 const amount = announcement && tx.declaredKwh ? 
-                    (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                    (tx.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
                 
-                message += `💰 €${amount} (${tx.declaredKwh || 'N/A'} KWH × ${announcement?.price || '?'}€)\n`;
+                message += `💰 €${amount} (${tx.declaredKwh || 'N/A'} KWH × ${announcement?.price || announcement?.basePrice || '?'}€)\n`;
                 message += `🆔 \`${tx.transactionId}\`\n`;
                 message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n`;
                 message += `💳 Metodi: ${announcement?.paymentMethods || 'Come concordato'}\n\n`;
@@ -329,7 +351,7 @@ class CommandHandler {
                 const tx = paymentPending[0];
                 const announcement = announcements[0];
                 const amount = announcement && tx.declaredKwh ? 
-                    (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                    (tx.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
                 
                 message += `\n💳 **PROCEDI CON IL PAGAMENTO:**\n`;
                 message += `Effettua il pagamento di €${amount} secondo i metodi concordati, poi conferma.`;
@@ -345,7 +367,7 @@ class CommandHandler {
                 const keyboardButtons = paymentPending.map((tx, index) => {
                     const announcement = announcements[index];
                     const amount = announcement && tx.declaredKwh ? 
-                        (tx.declaredKwh * announcement.price).toFixed(2) : 'N/A';
+                        (tx.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
                     
                     return [{
                         text: `💳 ${tx.transactionId.slice(-10)} - €${amount}`,
