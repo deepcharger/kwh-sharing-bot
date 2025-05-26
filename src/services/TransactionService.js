@@ -1,336 +1,561 @@
-const moment = require('moment');
+const mongoose = require('mongoose');
+const TransactionModel = require('../models/TransactionModel');
+const AnnouncementService = require('./AnnouncementService');
+const UserService = require('./UserService');
+const logger = require('../utils/logger');
 
 class TransactionService {
-    constructor(database) {
-        this.db = database;
-        this.transactions = database.getCollection('transactions');
-        this.feedback = database.getCollection('feedback');
-    }
-
-    async createTransaction(announcementId, sellerId, buyerId, transactionData) {
+    static async createTransaction(data) {
         try {
-            const timestamp = moment().format('YYYYMMDDHHmmss');
-            const transactionId = `T_${announcementId}_${timestamp}`;
-            
-            const transaction = {
-                transactionId,
-                announcementId,
-                sellerId,
-                buyerId,
-                
-                // Dati ricarica
-                scheduledDate: transactionData.scheduledDate,
-                brand: transactionData.brand,
-                currentType: transactionData.currentType, // AC/DC
-                location: transactionData.location,
-                serialNumber: transactionData.serialNumber,
-                connector: transactionData.connector,
-                
-                // Status tracking
-                status: 'pending_seller_confirmation',
-                
-                // Dati ricarica effettiva
-                actualKwh: null,
-                declaredKwh: null,  // KWH dichiarati dall'acquirente
-                displayPhoto: null,
-                // RIMOSSO: totalAmount e pricePerKwh
-                
-                // Timestamps
-                createdAt: new Date(),
-                updatedAt: new Date(),
-                confirmedAt: null,
-                chargingStartedAt: null,
-                chargingCompletedAt: null,
-                photoUploadedAt: null,
-                kwhDeclaredAt: null,  // NUOVO
-                paymentRequestedAt: null,
-                paymentConfirmedAt: null,
-                completedAt: null,
-                
-                // Problemi e note
-                issues: [],
-                adminNotes: [],
-                retryCount: 0
-            };
+            // Validazione dati obbligatori
+            if (!data.buyerId || !data.sellerId || !data.announcementId || !data.kwhAmount) {
+                throw new Error('Dati obbligatori mancanti');
+            }
 
-            const result = await this.transactions.insertOne(transaction);
-            return { ...transaction, _id: result.insertedId };
+            // Verifica che buyer e seller siano diversi
+            if (data.buyerId.toString() === data.sellerId.toString()) {
+                throw new Error('Non puoi comprare dalla tua stessa offerta');
+            }
+
+            // Recupera l'annuncio per calcolare il prezzo
+            const announcement = await AnnouncementService.getAnnouncementById(data.announcementId);
+            if (!announcement) {
+                throw new Error('Annuncio non trovato');
+            }
+
+            if (!announcement.isActive) {
+                throw new Error('Annuncio non più attivo');
+            }
+
+            // Verifica che il seller corrisponda
+            if (announcement.userId.toString() !== data.sellerId.toString()) {
+                throw new Error('Seller non corrispondente all\'annuncio');
+            }
+
+            // Calcola il prezzo usando il nuovo sistema
+            const priceCalculation = this.calculatePrice(announcement, data.kwhAmount);
             
+            // Crea la transazione
+            const transaction = new TransactionModel({
+                buyerId: data.buyerId,
+                sellerId: data.sellerId,
+                announcementId: data.announcementId,
+                kwhAmount: data.kwhAmount,
+                kwhUsedForCalculation: priceCalculation.kwhUsed,
+                pricePerKwh: priceCalculation.pricePerKwh,
+                totalAmount: priceCalculation.totalAmount,
+                appliedMinimum: priceCalculation.appliedMinimum || false,
+                appliedTier: priceCalculation.appliedTier || null,
+                status: 'pending',
+                createdAt: new Date(),
+                updatedAt: new Date()
+            });
+
+            await transaction.save();
+            logger.info(`Transazione creata: ${transaction._id}`);
+            return transaction;
+
         } catch (error) {
-            console.error('Errore creazione transazione:', error);
+            logger.error('Errore nella creazione della transazione:', error);
             throw error;
         }
     }
 
-    async getTransaction(transactionId) {
+    static calculatePrice(announcement, kwhAmount) {
         try {
-            return await this.transactions.findOne({ transactionId });
-        } catch (error) {
-            console.error('Errore get transazione:', error);
-            return null;
-        }
-    }
-
-    async updateTransactionStatus(transactionId, newStatus, additionalData = {}) {
-        try {
-            const updateData = {
-                status: newStatus,
-                updatedAt: new Date(),
-                ...additionalData
-            };
-
-            // Aggiungi timestamp specifici per alcuni status
-            const statusTimestamps = {
-                'confirmed': 'confirmedAt',
-                'charging_started': 'chargingStartedAt', 
-                'charging_completed': 'chargingCompletedAt',
-                'photo_uploaded': 'photoUploadedAt',
-                'kwh_declared': 'kwhDeclaredAt',  // NUOVO STATO
-                'payment_requested': 'paymentRequestedAt',
-                'payment_confirmed': 'paymentConfirmedAt',
-                'completed': 'completedAt'
-            };
-
-            if (statusTimestamps[newStatus]) {
-                updateData[statusTimestamps[newStatus]] = new Date();
+            if (!announcement || !kwhAmount || kwhAmount <= 0) {
+                throw new Error('Parametri non validi per il calcolo del prezzo');
             }
 
-            const result = await this.transactions.updateOne(
-                { transactionId },
-                { $set: updateData }
-            );
+            // Applica minimo se presente
+            const finalKwh = Math.max(kwhAmount, announcement.minimumKwh || 0);
 
-            return result.modifiedCount > 0;
-        } catch (error) {
-            console.error('Errore update status transazione:', error);
-            return false;
-        }
-    }
-
-    async addTransactionIssue(transactionId, issue, reportedBy) {
-        try {
-            const issueData = {
-                issue,
-                reportedBy,
-                timestamp: new Date()
-            };
-
-            await this.transactions.updateOne(
-                { transactionId },
-                { 
-                    $push: { issues: issueData },
-                    $set: { updatedAt: new Date() }
-                }
-            );
-
-            return true;
-        } catch (error) {
-            console.error('Errore aggiunta issue transazione:', error);
-            return false;
-        }
-    }
-
-    async incrementRetryCount(transactionId) {
-        try {
-            const result = await this.transactions.updateOne(
-                { transactionId },
-                { 
-                    $inc: { retryCount: 1 },
-                    $set: { updatedAt: new Date() }
-                }
-            );
-
-            const transaction = await this.getTransaction(transactionId);
-            return transaction?.retryCount || 0;
-        } catch (error) {
-            console.error('Errore increment retry:', error);
-            return 0;
-        }
-    }
-
-    async getUserTransactions(userId, type = 'all') {
-        try {
-            let query = {};
-            
-            if (type === 'seller') {
-                query.sellerId = userId;
-            } else if (type === 'buyer') {
-                query.buyerId = userId;
-            } else {
-                query = { $or: [{ sellerId: userId }, { buyerId: userId }] };
+            if (announcement.pricingType === 'fixed') {
+                return {
+                    totalAmount: finalKwh * announcement.basePrice,
+                    kwhUsed: finalKwh,
+                    pricePerKwh: announcement.basePrice,
+                    appliedMinimum: finalKwh > kwhAmount
+                };
             }
 
-            return await this.transactions
-                .find(query)
-                .sort({ createdAt: -1 })
-                .toArray();
-        } catch (error) {
-            console.error('Errore get transazioni utente:', error);
-            return [];
-        }
-    }
-
-    async getPendingTransactions() {
-        try {
-            const pendingStatuses = [
-                'pending_seller_confirmation',
-                'confirmed', 
-                'charging_started',
-                'charging_completed',
-                'photo_uploaded',
-                'kwh_declared',
-                'payment_requested'
-            ];
-
-            return await this.transactions
-                .find({ status: { $in: pendingStatuses } })
-                .sort({ createdAt: 1 })
-                .toArray();
-        } catch (error) {
-            console.error('Errore get transazioni pending:', error);
-            return [];
-        }
-    }
-
-    async addAdminNote(transactionId, note, adminUserId) {
-        try {
-            const adminNote = {
-                note,
-                adminUserId,
-                timestamp: new Date()
-            };
-
-            await this.transactions.updateOne(
-                { transactionId },
-                { 
-                    $push: { adminNotes: adminNote },
-                    $set: { updatedAt: new Date() }
-                }
-            );
-
-            return true;
-        } catch (error) {
-            console.error('Errore aggiunta nota admin:', error);
-            return false;
-        }
-    }
-
-    async getTransactionStats() {
-        try {
-            const pipeline = [
-                {
-                    $group: {
-                        _id: '$status',
-                        count: { $sum: 1 },
-                        totalKwh: { $sum: '$actualKwh' }
+            if (announcement.pricingType === 'graduated') {
+                // Trova la fascia appropriata
+                let applicableTier = announcement.pricingTiers[announcement.pricingTiers.length - 1]; // Default ultima fascia
+                
+                for (let tier of announcement.pricingTiers) {
+                    if (tier.limit === null || finalKwh <= tier.limit) {
+                        applicableTier = tier;
+                        break;
                     }
                 }
-            ];
 
-            const statusStats = await this.transactions.aggregate(pipeline).toArray();
+                return {
+                    totalAmount: finalKwh * applicableTier.price,
+                    kwhUsed: finalKwh,
+                    pricePerKwh: applicableTier.price,
+                    appliedTier: {
+                        limit: applicableTier.limit,
+                        price: applicableTier.price
+                    },
+                    appliedMinimum: finalKwh > kwhAmount
+                };
+            }
+
+            throw new Error('Tipo di prezzo non supportato');
+        } catch (error) {
+            logger.error('Errore nel calcolo del prezzo:', error);
+            throw error;
+        }
+    }
+
+    static async getTransactionById(id) {
+        try {
+            if (!mongoose.Types.ObjectId.isValid(id)) {
+                throw new Error('ID transazione non valido');
+            }
+
+            const transaction = await TransactionModel
+                .findById(id)
+                .populate('buyerId', 'username firstName lastName')
+                .populate('sellerId', 'username firstName lastName')
+                .populate('announcementId');
+
+            return transaction;
+        } catch (error) {
+            logger.error('Errore nel recupero della transazione:', error);
+            throw error;
+        }
+    }
+
+    static async getUserTransactions(userId, type = 'all') {
+        try {
+            let query = {};
+
+            switch (type) {
+                case 'buy':
+                    query.buyerId = userId;
+                    break;
+                case 'sell':
+                    query.sellerId = userId;
+                    break;
+                case 'all':
+                default:
+                    query.$or = [{ buyerId: userId }, { sellerId: userId }];
+                    break;
+            }
+
+            const transactions = await TransactionModel
+                .find(query)
+                .populate('buyerId', 'username firstName lastName')
+                .populate('sellerId', 'username firstName lastName')
+                .populate('announcementId')
+                .sort({ createdAt: -1 });
+
+            return transactions;
+        } catch (error) {
+            logger.error('Errore nel recupero delle transazioni utente:', error);
+            throw error;
+        }
+    }
+
+    static async updateTransactionStatus(id, status, updatedBy) {
+        try {
+            if (!mongoose.Types.ObjectId.isValid(id)) {
+                throw new Error('ID transazione non valido');
+            }
+
+            const validStatuses = ['pending', 'confirmed', 'completed', 'cancelled'];
+            if (!validStatuses.includes(status)) {
+                throw new Error('Status non valido');
+            }
+
+            const transaction = await TransactionModel.findById(id);
+            if (!transaction) {
+                throw new Error('Transazione non trovata');
+            }
+
+            // Verifica autorizzazioni
+            const isAuthorized = transaction.buyerId.toString() === updatedBy.toString() || 
+                               transaction.sellerId.toString() === updatedBy.toString();
             
-            const overallPipeline = [
+            if (!isAuthorized) {
+                throw new Error('Non autorizzato a modificare questa transazione');
+            }
+
+            // Logica di transizione degli stati
+            if (transaction.status === 'completed' || transaction.status === 'cancelled') {
+                throw new Error('Transazione già finalizzata');
+            }
+
+            const updatedTransaction = await TransactionModel.findByIdAndUpdate(
+                id,
+                { 
+                    status,
+                    updatedAt: new Date(),
+                    ...(status === 'completed' && { completedAt: new Date() })
+                },
+                { new: true }
+            );
+
+            logger.info(`Transazione ${id} aggiornata a status: ${status}`);
+            return updatedTransaction;
+
+        } catch (error) {
+            logger.error('Errore nell\'aggiornamento dello status:', error);
+            throw error;
+        }
+    }
+
+    static async confirmTransaction(id, userId) {
+        try {
+            const transaction = await this.getTransactionById(id);
+            if (!transaction) {
+                throw new Error('Transazione non trovata');
+            }
+
+            // Solo il seller può confermare
+            if (transaction.sellerId._id.toString() !== userId.toString()) {
+                throw new Error('Solo il venditore può confermare la transazione');
+            }
+
+            if (transaction.status !== 'pending') {
+                throw new Error('Transazione non in stato pending');
+            }
+
+            return await this.updateTransactionStatus(id, 'confirmed', userId);
+        } catch (error) {
+            logger.error('Errore nella conferma della transazione:', error);
+            throw error;
+        }
+    }
+
+    static async completeTransaction(id, userId) {
+        try {
+            const transaction = await this.getTransactionById(id);
+            if (!transaction) {
+                throw new Error('Transazione non trovata');
+            }
+
+            // Solo il buyer può completare
+            if (transaction.buyerId._id.toString() !== userId.toString()) {
+                throw new Error('Solo il compratore può completare la transazione');
+            }
+
+            if (transaction.status !== 'confirmed') {
+                throw new Error('Transazione deve essere confermata prima del completamento');
+            }
+
+            return await this.updateTransactionStatus(id, 'completed', userId);
+        } catch (error) {
+            logger.error('Errore nel completamento della transazione:', error);
+            throw error;
+        }
+    }
+
+    static async cancelTransaction(id, userId) {
+        try {
+            const transaction = await this.getTransactionById(id);
+            if (!transaction) {
+                throw new Error('Transazione non trovata');
+            }
+
+            // Entrambi possono cancellare se pending
+            const isAuthorized = transaction.buyerId._id.toString() === userId.toString() || 
+                               transaction.sellerId._id.toString() === userId.toString();
+            
+            if (!isAuthorized) {
+                throw new Error('Non autorizzato');
+            }
+
+            if (transaction.status === 'completed') {
+                throw new Error('Non puoi cancellare una transazione completata');
+            }
+
+            return await this.updateTransactionStatus(id, 'cancelled', userId);
+        } catch (error) {
+            logger.error('Errore nella cancellazione della transazione:', error);
+            throw error;
+        }
+    }
+
+    static async getTransactionStats(userId) {
+        try {
+            const stats = await TransactionModel.aggregate([
+                {
+                    $match: {
+                        $or: [
+                            { buyerId: new mongoose.Types.ObjectId(userId) },
+                            { sellerId: new mongoose.Types.ObjectId(userId) }
+                        ]
+                    }
+                },
                 {
                     $group: {
                         _id: null,
                         totalTransactions: { $sum: 1 },
-                        completedTransactions: {
-                            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] }
+                        totalAmount: { $sum: '$totalAmount' },
+                        totalKwh: { $sum: '$kwhAmount' },
+                        pendingCount: { 
+                            $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } 
                         },
-                        totalKwh: { $sum: '$actualKwh' },
-                        avgKwhPerTransaction: { $avg: '$actualKwh' }
+                        confirmedCount: { 
+                            $sum: { $cond: [{ $eq: ['$status', 'confirmed'] }, 1, 0] } 
+                        },
+                        completedCount: { 
+                            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } 
+                        },
+                        cancelledCount: { 
+                            $sum: { $cond: [{ $eq: ['$status', 'cancelled'] }, 1, 0] } 
+                        }
                     }
                 }
-            ];
+            ]);
 
-            const overallStats = await this.transactions.aggregate(overallPipeline).toArray();
+            // Statistiche separate per acquisti e vendite
+            const buyStats = await TransactionModel.aggregate([
+                { $match: { buyerId: new mongoose.Types.ObjectId(userId) } },
+                {
+                    $group: {
+                        _id: null,
+                        buyTransactions: { $sum: 1 },
+                        buyAmount: { $sum: '$totalAmount' },
+                        buyKwh: { $sum: '$kwhAmount' }
+                    }
+                }
+            ]);
+
+            const sellStats = await TransactionModel.aggregate([
+                { $match: { sellerId: new mongoose.Types.ObjectId(userId) } },
+                {
+                    $group: {
+                        _id: null,
+                        sellTransactions: { $sum: 1 },
+                        sellAmount: { $sum: '$totalAmount' },
+                        sellKwh: { $sum: '$kwhAmount' }
+                    }
+                }
+            ]);
 
             return {
-                byStatus: statusStats,
-                overall: overallStats[0] || {}
+                overall: stats[0] || {
+                    totalTransactions: 0,
+                    totalAmount: 0,
+                    totalKwh: 0,
+                    pendingCount: 0,
+                    confirmedCount: 0,
+                    completedCount: 0,
+                    cancelledCount: 0
+                },
+                buying: buyStats[0] || {
+                    buyTransactions: 0,
+                    buyAmount: 0,
+                    buyKwh: 0
+                },
+                selling: sellStats[0] || {
+                    sellTransactions: 0,
+                    sellAmount: 0,
+                    sellKwh: 0
+                }
             };
         } catch (error) {
-            console.error('Errore get stats transazioni:', error);
-            return null;
-        }
-    }
-
-    async cancelTransaction(transactionId, reason, cancelledBy) {
-        try {
-            await this.updateTransactionStatus(transactionId, 'cancelled', {
-                cancellationReason: reason,
-                cancelledBy: cancelledBy,
-                cancelledAt: new Date()
-            });
-
-            return true;
-        } catch (error) {
-            console.error('Errore cancellazione transazione:', error);
-            return false;
-        }
-    }
-
-    async createFeedback(transactionId, fromUserId, toUserId, rating, comment = '') {
-        try {
-            const feedback = {
-                transactionId,
-                fromUserId,
-                toUserId,
-                rating, // 1-5
-                comment,
-                createdAt: new Date()
-            };
-
-            const result = await this.feedback.insertOne(feedback);
-            
-            // Aggiorna il conteggio feedback dell'utente ricevente
-            await this.updateUserFeedbackStats(toUserId);
-            
-            return { ...feedback, _id: result.insertedId };
-        } catch (error) {
-            console.error('Errore creazione feedback:', error);
+            logger.error('Errore nel calcolo delle statistiche transazioni:', error);
             throw error;
         }
     }
 
-    async updateUserFeedbackStats(userId) {
+    static async getRecentTransactions(limit = 10) {
         try {
-            const pipeline = [
-                { $match: { toUserId: userId } },
+            const transactions = await TransactionModel
+                .find()
+                .populate('buyerId', 'username firstName lastName')
+                .populate('sellerId', 'username firstName lastName')
+                .populate('announcementId')
+                .sort({ createdAt: -1 })
+                .limit(limit);
+
+            return transactions;
+        } catch (error) {
+            logger.error('Errore nel recupero delle transazioni recenti:', error);
+            throw error;
+        }
+    }
+
+    static async getPendingTransactions() {
+        try {
+            const transactions = await TransactionModel
+                .find({ status: { $in: ['pending', 'confirmed'] } })
+                .populate('buyerId', 'username firstName lastName')
+                .populate('sellerId', 'username firstName lastName')
+                .populate('announcementId')
+                .sort({ createdAt: 1 });
+
+            return transactions;
+        } catch (error) {
+            logger.error('Errore nel recupero delle transazioni pending:', error);
+            throw error;
+        }
+    }
+
+    static async searchTransactions(filters) {
+        try {
+            const query = {};
+
+            if (filters.userId) {
+                query.$or = [
+                    { buyerId: filters.userId },
+                    { sellerId: filters.userId }
+                ];
+            }
+
+            if (filters.status) {
+                query.status = filters.status;
+            }
+
+            if (filters.dateFrom) {
+                query.createdAt = { $gte: new Date(filters.dateFrom) };
+            }
+
+            if (filters.dateTo) {
+                query.createdAt = { 
+                    ...query.createdAt, 
+                    $lte: new Date(filters.dateTo) 
+                };
+            }
+
+            if (filters.minAmount) {
+                query.totalAmount = { $gte: filters.minAmount };
+            }
+
+            if (filters.maxAmount) {
+                query.totalAmount = { 
+                    ...query.totalAmount, 
+                    $lte: filters.maxAmount 
+                };
+            }
+
+            const transactions = await TransactionModel
+                .find(query)
+                .populate('buyerId', 'username firstName lastName')
+                .populate('sellerId', 'username firstName lastName')
+                .populate('announcementId')
+                .sort({ createdAt: -1 });
+
+            return transactions;
+        } catch (error) {
+            logger.error('Errore nella ricerca delle transazioni:', error);
+            throw error;
+        }
+    }
+
+    // Funzione per ricalcolare il prezzo di una transazione esistente
+    static async recalculateTransactionPrice(transactionId, newKwhAmount) {
+        try {
+            const transaction = await this.getTransactionById(transactionId);
+            if (!transaction) {
+                throw new Error('Transazione non trovata');
+            }
+
+            const announcement = await AnnouncementService.getAnnouncementById(
+                transaction.announcementId._id || transaction.announcementId
+            );
+            if (!announcement) {
+                throw new Error('Annuncio associato non trovato');
+            }
+
+            // Calcola nuovo prezzo
+            const priceCalculation = this.calculatePrice(announcement, newKwhAmount);
+
+            // Aggiorna la transazione
+            const updatedTransaction = await TransactionModel.findByIdAndUpdate(
+                transactionId,
                 {
-                    $group: {
-                        _id: null,
-                        totalFeedback: { $sum: 1 },
-                        averageRating: { $avg: '$rating' },
-                        positiveCount: {
-                            $sum: { $cond: [{ $gte: ['$rating', 4] }, 1, 0] }
-                        }
+                    kwhAmount: newKwhAmount,
+                    kwhUsedForCalculation: priceCalculation.kwhUsed,
+                    pricePerKwh: priceCalculation.pricePerKwh,
+                    totalAmount: priceCalculation.totalAmount,
+                    appliedMinimum: priceCalculation.appliedMinimum || false,
+                    appliedTier: priceCalculation.appliedTier || null,
+                    updatedAt: new Date()
+                },
+                { new: true }
+            );
+
+            logger.info(`Prezzo transazione ${transactionId} ricalcolato`);
+            return updatedTransaction;
+
+        } catch (error) {
+            logger.error('Errore nel ricalcolo del prezzo:', error);
+            throw error;
+        }
+    }
+
+    // Funzione per generare un resoconto dettagliato della transazione
+    static formatTransactionSummary(transaction, announcement) {
+        try {
+            let summary = `🔖 **RIEPILOGO TRANSAZIONE**\n\n`;
+            summary += `📋 ID: \`${transaction._id}\`\n`;
+            summary += `📅 Data: ${transaction.createdAt.toLocaleDateString('it-IT')}\n`;
+            summary += `📊 Status: **${this.getStatusText(transaction.status)}**\n\n`;
+
+            summary += `👤 **Acquirente:** ${transaction.buyerId.username || transaction.buyerId.firstName}\n`;
+            summary += `👤 **Venditore:** ${transaction.sellerId.username || transaction.sellerId.firstName}\n\n`;
+
+            summary += `⚡ **Dettagli Energia:**\n`;
+            summary += `• KWH richiesti: ${transaction.kwhAmount}\n`;
+            summary += `• KWH per calcolo: ${transaction.kwhUsedForCalculation}\n`;
+
+            if (transaction.appliedMinimum) {
+                summary += `🎯 *Applicato minimo garantito*\n`;
+            }
+
+            summary += `\n💰 **Dettagli Prezzo:**\n`;
+            
+            if (announcement) {
+                if (announcement.pricingType === 'fixed') {
+                    summary += `• Tipo: Prezzo fisso\n`;
+                    summary += `• Prezzo: ${transaction.pricePerKwh}€/KWH\n`;
+                } else if (announcement.pricingType === 'graduated') {
+                    summary += `• Tipo: Prezzi graduati\n`;
+                    summary += `• Fascia applicata: ${transaction.pricePerKwh}€/KWH\n`;
+                    if (transaction.appliedTier && transaction.appliedTier.limit) {
+                        summary += `• Limite fascia: ${transaction.appliedTier.limit} KWH\n`;
                     }
                 }
-            ];
-
-            const stats = await this.feedback.aggregate(pipeline).toArray();
-            
-            if (stats.length > 0) {
-                const { totalFeedback, averageRating, positiveCount } = stats[0];
-                const positivePercentage = (positiveCount / totalFeedback) * 100;
-
-                // Aggiorna le statistiche utente nella collezione users
-                await this.db.getCollection('users').updateOne(
-                    { userId },
-                    {
-                        $set: {
-                            feedbackCount: totalFeedback,
-                            rating: Math.round(averageRating * 10) / 10,
-                            positivePercentage: Math.round(positivePercentage * 10) / 10,
-                            updatedAt: new Date()
-                        }
-                    }
-                );
             }
+
+            summary += `• **Totale: €${transaction.totalAmount.toFixed(2)}**\n\n`;
+
+            if (transaction.status === 'completed' && transaction.completedAt) {
+                summary += `✅ Completata il: ${transaction.completedAt.toLocaleDateString('it-IT')}\n`;
+            }
+
+            return summary;
+
         } catch (error) {
-            console.error('Errore update feedback stats:', error);
+            logger.error('Errore nella formattazione del riepilogo:', error);
+            return 'Errore nella generazione del riepilogo';
         }
+    }
+
+    static getStatusText(status) {
+        const statusMap = {
+            'pending': 'In attesa',
+            'confirmed': 'Confermata',
+            'completed': 'Completata',
+            'cancelled': 'Annullata'
+        };
+        return statusMap[status] || status;
+    }
+
+    static getStatusEmoji(status) {
+        const emojiMap = {
+            'pending': '⏳',
+            'confirmed': '✅',
+            'completed': '🎉',
+            'cancelled': '❌'
+        };
+        return emojiMap[status] || '❓';
     }
 }
 
