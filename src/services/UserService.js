@@ -1,150 +1,124 @@
-const mongoose = require('mongoose');
-const UserModel = require('../models/UserModel');
-const logger = require('../utils/logger');
-
 class UserService {
-    static async createUser(userData) {
+    constructor(db) {
+        this.db = db;
+        this.collection = db.getCollection('users');
+    }
+
+    async upsertUser(userData) {
         try {
-            const existingUser = await UserModel.findByUserId(userData.userId);
-            
-            if (existingUser) {
-                // Aggiorna dati esistenti
-                existingUser.username = userData.username;
-                existingUser.firstName = userData.firstName;
-                existingUser.lastName = userData.lastName;
-                existingUser.lastActivity = new Date();
-                
-                await existingUser.save();
-                logger.info(`User updated: ${userData.userId}`);
-                return existingUser;
-            }
-            
-            // Crea nuovo utente
-            const newUser = new UserModel({
+            const user = {
                 userId: userData.userId,
                 username: userData.username,
                 firstName: userData.firstName,
-                lastName: userData.lastName
-            });
-            
-            await newUser.save();
-            logger.info(`New user created: ${userData.userId}`);
-            return newUser;
-            
-        } catch (error) {
-            logger.error('Error in createUser:', error);
-            throw error;
-        }
-    }
-
-    static async getUserById(userId) {
-        try {
-            return await UserModel.findByUserId(userId);
-        } catch (error) {
-            logger.error('Error in getUserById:', error);
-            throw error;
-        }
-    }
-
-    static async updateUserActivity(userId) {
-        try {
-            const user = await UserModel.findByUserId(userId);
-            if (user) {
-                await user.updateActivity();
-            }
-        } catch (error) {
-            logger.error('Error in updateUserActivity:', error);
-        }
-    }
-
-    static async updateUserStats(userId, transactionData) {
-        try {
-            const user = await UserModel.findByUserId(userId);
-            if (!user) return;
-
-            // Aggiorna statistiche
-            user.totalTransactions += 1;
-            
-            if (transactionData.type === 'buy') {
-                user.totalKwhBought += transactionData.kwh;
-                user.totalSpent += transactionData.amount;
-            } else if (transactionData.type === 'sell') {
-                user.totalKwhSold += transactionData.kwh;
-                user.totalEarned += transactionData.amount;
-            }
-
-            await user.save();
-            logger.info(`User stats updated: ${userId}`);
-            
-        } catch (error) {
-            logger.error('Error in updateUserStats:', error);
-            throw error;
-        }
-    }
-
-    static async updateUserRating(userId, newRating) {
-        try {
-            const user = await UserModel.findByUserId(userId);
-            if (!user) return;
-
-            // Calcola nuovo rating medio
-            const totalPoints = (user.averageRating * user.totalRatings) + newRating;
-            user.totalRatings += 1;
-            user.averageRating = totalPoints / user.totalRatings;
-
-            await user.save();
-            logger.info(`User rating updated: ${userId} - New avg: ${user.averageRating}`);
-            
-        } catch (error) {
-            logger.error('Error in updateUserRating:', error);
-            throw error;
-        }
-    }
-
-    static async getUsersStats() {
-        try {
-            const stats = await UserModel.aggregate([
-                {
-                    $group: {
-                        _id: null,
-                        totalUsers: { $sum: 1 },
-                        activeUsers: { 
-                            $sum: { $cond: ['$isActive', 1, 0] } 
-                        },
-                        avgRating: { $avg: '$averageRating' },
-                        totalKwhTraded: { 
-                            $sum: { $add: ['$totalKwhBought', '$totalKwhSold'] } 
-                        }
-                    }
-                }
-            ]);
-
-            return stats[0] || {
-                totalUsers: 0,
-                activeUsers: 0,
-                avgRating: 0,
-                totalKwhTraded: 0
+                lastName: userData.lastName,
+                lastActivity: new Date(),
+                updatedAt: new Date()
             };
-            
+
+            const result = await this.collection.updateOne(
+                { userId: userData.userId },
+                { 
+                    $set: user,
+                    $setOnInsert: {
+                        createdAt: new Date(),
+                        totalKwhSold: 0,
+                        totalKwhBought: 0,
+                        totalTransactions: 0,
+                        totalFeedback: 0,
+                        avgRating: 0,
+                        positivePercentage: 0,
+                        sellerBadge: null
+                    }
+                },
+                { upsert: true }
+            );
+
+            console.log(`User ${userData.userId} upserted`);
+            return result;
         } catch (error) {
-            logger.error('Error in getUsersStats:', error);
+            console.error('Error upserting user:', error);
             throw error;
         }
     }
 
-    static async getTopUsers(limit = 10) {
+    async getUser(userId) {
         try {
-            return await UserModel
-                .find({ 
-                    isActive: true,
-                    totalRatings: { $gte: 5 } // Almeno 5 recensioni
-                })
-                .sort({ averageRating: -1, totalRatings: -1 })
-                .limit(limit)
-                .select('userId username firstName averageRating totalRatings totalKwhSold');
-                
+            return await this.collection.findOne({ userId: userId });
         } catch (error) {
-            logger.error('Error in getTopUsers:', error);
+            console.error('Error getting user:', error);
+            throw error;
+        }
+    }
+
+    async getUserStats(userId) {
+        try {
+            const user = await this.getUser(userId);
+            if (!user) {
+                return {
+                    totalFeedback: 0,
+                    avgRating: 0,
+                    positivePercentage: 0,
+                    sellerBadge: null
+                };
+            }
+
+            return {
+                totalFeedback: user.totalFeedback || 0,
+                avgRating: user.avgRating || 0,
+                positivePercentage: user.positivePercentage || 0,
+                sellerBadge: user.sellerBadge || null
+            };
+        } catch (error) {
+            console.error('Error getting user stats:', error);
+            throw error;
+        }
+    }
+
+    async updateUserTransactionStats(userId, kwhAmount, type) {
+        try {
+            const updateData = {
+                $inc: {
+                    totalTransactions: 1
+                }
+            };
+
+            if (type === 'sell') {
+                updateData.$inc.totalKwhSold = kwhAmount;
+            } else if (type === 'buy') {
+                updateData.$inc.totalKwhBought = kwhAmount;
+            }
+
+            await this.collection.updateOne(
+                { userId: userId },
+                updateData
+            );
+
+        } catch (error) {
+            console.error('Error updating user stats:', error);
+            throw error;
+        }
+    }
+
+    async isUserInGroup(userId, groupId) {
+        try {
+            // Per ora assumiamo che tutti gli utenti registrati siano nel gruppo
+            // In futuro si può implementare una verifica reale
+            const user = await this.getUser(userId);
+            return !!user;
+        } catch (error) {
+            console.error('Error checking user in group:', error);
+            return false;
+        }
+    }
+
+    async getAllUsersWithStats() {
+        try {
+            return await this.collection
+                .find({})
+                .sort({ positivePercentage: -1 })
+                .toArray();
+        } catch (error) {
+            console.error('Error getting all users:', error);
             throw error;
         }
     }
