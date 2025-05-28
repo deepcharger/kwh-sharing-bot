@@ -752,29 +752,66 @@ class CallbackHandler {
                 'buy'
             );
 
+            // NOTIFICA ENTRAMBI GLI UTENTI PER IL FEEDBACK
+            
+            // 1. Notifica persistente all'ACQUIRENTE
             try {
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.buyerId } },
-                    Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST + 
-                    `\n\n🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
+                    `🎉 **TRANSAZIONE COMPLETATA!**\n\n` +
+                    `Il venditore ha confermato la ricezione del pagamento.\n\n` +
+                    `⭐ **Lascia un feedback**\n` +
+                    `La tua valutazione aiuta la community a crescere.\n\n` +
+                    `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
                     {
                         parse_mode: 'Markdown',
-                        reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '⭐ Valuta il venditore', callback_data: `feedback_tx_${transactionId}` }]
+                            ]
+                        }
                     }
                 );
             } catch (error) {
-                console.error('Error notifying buyer:', error);
+                console.error('Error notifying buyer for feedback:', error);
             }
 
+            // 2. Notifica persistente anche al VENDITORE (NUOVO!)
+            try {
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.sellerId } },
+                    `🎉 **TRANSAZIONE COMPLETATA!**\n\n` +
+                    `Hai confermato la ricezione del pagamento.\n\n` +
+                    `⭐ **Lascia un feedback**\n` +
+                    `Valuta l'acquirente per aiutare la community.\n\n` +
+                    `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '⭐ Valuta l\'acquirente', callback_data: `feedback_tx_${transactionId}` }]
+                            ]
+                        }
+                    }
+                );
+            } catch (error) {
+                console.error('Error notifying seller for feedback:', error);
+            }
+
+            // 3. Messaggio di conferma nel messaggio corrente
             await ctx.editMessageText(
-                Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST,
+                '✅ **Pagamento confermato!**\n\n' +
+                'La transazione è stata completata con successo.\n' +
+                'Entrambi riceverete una notifica per lasciare il feedback reciproco.',
                 {
                     parse_mode: 'Markdown',
-                    reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🏠 Menu principale', callback_data: 'back_to_main' }]
+                        ]
+                    }
                 }
             );
-            
-            ctx.session.completedTransactionId = transactionId;
         });
 
         this.bot.bot.action('payment_not_received', async (ctx) => {
@@ -921,29 +958,66 @@ class CallbackHandler {
                 'buy'
             );
 
+            // NOTIFICA ENTRAMBI PER IL FEEDBACK
+            
+            // 1. Notifica all'acquirente
             try {
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.buyerId } },
-                    Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST + 
-                    `\n\n🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
+                    `🎉 **TRANSAZIONE COMPLETATA!**\n\n` +
+                    `Il venditore ha confermato la ricezione del pagamento.\n\n` +
+                    `⭐ **Lascia un feedback**\n` +
+                    `La tua valutazione aiuta la community a crescere.\n\n` +
+                    `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
                     {
                         parse_mode: 'Markdown',
-                        reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '⭐ Valuta il venditore', callback_data: `feedback_tx_${transactionId}` }]
+                            ]
+                        }
                     }
                 );
             } catch (error) {
-                console.error('Error notifying buyer:', error);
+                console.error('Error notifying buyer for feedback:', error);
             }
 
+            // 2. Notifica al venditore (NUOVO!)
+            try {
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.sellerId } },
+                    `🎉 **TRANSAZIONE COMPLETATA!**\n\n` +
+                    `Hai confermato la ricezione del pagamento.\n\n` +
+                    `⭐ **Lascia un feedback**\n` +
+                    `Valuta l'acquirente per aiutare la community.\n\n` +
+                    `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '⭐ Valuta l\'acquirente', callback_data: `feedback_tx_${transactionId}` }]
+                            ]
+                        }
+                    }
+                );
+            } catch (error) {
+                console.error('Error notifying seller for feedback:', error);
+            }
+
+            // 3. Conferma nel messaggio corrente
             await ctx.editMessageText(
-                Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST,
+                '✅ **Pagamento confermato!**\n\n' +
+                'La transazione è stata completata con successo.\n' +
+                'Entrambi riceverete una notifica per lasciare il feedback reciproco.',
                 {
                     parse_mode: 'Markdown',
-                    reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🏠 Menu principale', callback_data: 'back_to_main' }]
+                        ]
+                    }
                 }
             );
-            
-            ctx.session.completedTransactionId = transactionId;
         });
 
         this.bot.bot.action(/^payment_fail_(.+)$/, async (ctx) => {
