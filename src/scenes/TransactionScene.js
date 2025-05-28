@@ -440,9 +440,61 @@ function createTransactionScene(bot) {
         return ctx.scene.leave();
     });
 
+    // FIX: Bottone Indietro - torna alla lista delle transazioni
     scene.action('tx_back', async (ctx) => {
         await ctx.answerCbQuery();
-        return ctx.scene.leave();
+        
+        // Elimina il messaggio corrente
+        try {
+            await ctx.deleteMessage();
+        } catch (error) {
+            console.log('Could not delete message:', error);
+        }
+        
+        // Esci dalla scene
+        await ctx.scene.leave();
+        
+        // Torna alla lista delle transazioni
+        const userId = ctx.from.id;
+        const transactions = await bot.transactionService.getUserTransactions(userId, 'all');
+        
+        if (transactions.length === 0) {
+            await bot.chatCleaner.sendTemporaryMessage(ctx,
+                '📭 Non hai ancora transazioni.',
+                {},
+                3000
+            );
+            
+            setTimeout(async () => {
+                await bot.chatCleaner.resetUserChat(ctx);
+            }, 3000);
+            return;
+        }
+
+        const pending = transactions.filter(t => !['completed', 'cancelled'].includes(t.status));
+        const completed = transactions.filter(t => t.status === 'completed');
+
+        let message = '💼 **LE TUE TRANSAZIONI**\n\n';
+        
+        if (pending.length > 0) {
+            message += `⏳ **IN CORSO (${pending.length}):**\n`;
+            for (const tx of pending.slice(0, 5)) {
+                const statusEmoji = bot.getStatusEmoji(tx.status);
+                const statusText = bot.getStatusText(tx.status).replace(/_/g, '\\_');
+                const displayId = tx.transactionId.slice(-10).replace(/_/g, '\\_');
+                message += `${statusEmoji} \`${displayId}\`\n`;
+                message += `📊 ${statusText}\n`;
+                message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
+            }
+        }
+        
+        message += `✅ **Completate:** ${completed.length}\n`;
+        
+        await bot.chatCleaner.replaceMessage(ctx, message, {
+            parse_mode: 'Markdown',
+            reply_markup: Keyboards.getTransactionsKeyboard(pending, completed).reply_markup,
+            messageType: 'navigation'
+        });
     });
 
     scene.action('tx_leave_feedback', async (ctx) => {
