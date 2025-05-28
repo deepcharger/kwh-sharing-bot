@@ -62,7 +62,8 @@ class CallbackHandler {
                 message += `⏳ **IN CORSO (${pending.length}):**\n`;
                 for (const tx of pending.slice(0, 5)) {
                     const statusEmoji = this.bot.getStatusEmoji(tx.status);
-                    const statusText = this.bot.getStatusText(tx.status);
+                    // Escape gli underscore nel testo dello stato
+                    const statusText = this.bot.getStatusText(tx.status).replace(/_/g, '\\_');
                     const displayId = tx.transactionId.length > 15 ? 
                         tx.transactionId.substring(2, 12) + '...' : 
                         tx.transactionId;
