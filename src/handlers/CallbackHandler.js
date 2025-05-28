@@ -549,6 +549,58 @@ class CallbackHandler {
             ctx.session.transactionId = transaction.transactionId;
             await this.bot.chatCleaner.enterScene(ctx, 'transactionScene');
         });
+
+        // IMPORTANTE: Callback per "Ho pagato" dal messaggio esterno
+        this.bot.bot.action(/^payment_done_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const transactionId = ctx.match[1];
+            
+            const transaction = await this.bot.transactionService.getTransaction(transactionId);
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            // Verifica che sia l'acquirente
+            if (ctx.from.id !== transaction.buyerId) {
+                await ctx.answerCbQuery('❌ Non sei autorizzato.', { show_alert: true });
+                return;
+            }
+            
+            await this.bot.transactionService.updateTransactionStatus(
+                transactionId,
+                'payment_declared'
+            );
+
+            try {
+                const announcement = await this.bot.announcementService.getAnnouncement(transaction.announcementId);
+                const amount = announcement && transaction.declaredKwh ? 
+                    (transaction.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
+                
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.sellerId } },
+                    `💳 **PAGAMENTO DICHIARATO**\n\n` +
+                    `L'acquirente @${ctx.from.username || ctx.from.first_name} dichiara di aver pagato.\n\n` +
+                    `💰 Importo dichiarato: €${amount}\n` +
+                    `⚡ KWH forniti: ${transaction.declaredKwh || 'N/A'}\n` +
+                    `🔍 ID Transazione: \`${transactionId}\`\n\n` +
+                    `Hai ricevuto il pagamento?`,
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: Keyboards.getSellerPaymentConfirmKeyboard().reply_markup
+                    }
+                );
+            } catch (error) {
+                console.error('Error notifying seller:', error);
+            }
+
+            await ctx.editMessageText(
+                `✅ **DICHIARAZIONE PAGAMENTO INVIATA!**\n\n` +
+                `Il venditore è stato notificato e dovrà confermare la ricezione del pagamento.\n\n` +
+                `Riceverai aggiornamenti sullo stato della transazione.`,
+                { parse_mode: 'Markdown' }
+            );
+        });
     }
 
     setupPaymentCallbacks() {
@@ -827,6 +879,95 @@ class CallbackHandler {
                     reply_markup: Keyboards.getPaymentConfirmationKeyboard().reply_markup
                 }
             );
+        });
+
+        // CALLBACK PER CONFERME PAGAMENTO DEL VENDITORE
+        this.bot.bot.action(/^payment_ok_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const transactionId = ctx.match[1];
+            
+            const transaction = await this.bot.transactionService.getTransaction(transactionId);
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            // Verifica che sia il venditore
+            if (ctx.from.id !== transaction.sellerId) {
+                await ctx.answerCbQuery('❌ Non sei autorizzato.', { show_alert: true });
+                return;
+            }
+            
+            await this.bot.transactionService.updateTransactionStatus(
+                transactionId,
+                'completed'
+            );
+
+            await this.bot.userService.updateUserTransactionStats(
+                transaction.sellerId,
+                transaction.actualKwh || transaction.declaredKwh,
+                'sell'
+            );
+            await this.bot.userService.updateUserTransactionStats(
+                transaction.buyerId,
+                transaction.actualKwh || transaction.declaredKwh,
+                'buy'
+            );
+
+            try {
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.buyerId } },
+                    Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST + 
+                    `\n\n🔍 ID Transazione: \`${transactionId}\``,
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
+                    }
+                );
+            } catch (error) {
+                console.error('Error notifying buyer:', error);
+            }
+
+            await ctx.editMessageText(
+                Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
+                }
+            );
+            
+            ctx.session.completedTransactionId = transactionId;
+        });
+
+        this.bot.bot.action(/^payment_fail_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const transactionId = ctx.match[1];
+            
+            const transaction = await this.bot.transactionService.getTransaction(transactionId);
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            await this.bot.transactionService.addTransactionIssue(
+                transactionId,
+                'Pagamento non ricevuto dal venditore',
+                transaction.sellerId
+            );
+            
+            try {
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.buyerId } },
+                    '⚠️ **PROBLEMA PAGAMENTO**\n\n' +
+                    'Il venditore segnala di non aver ricevuto il pagamento.\n\n' +
+                    'Controlla il metodo di pagamento e riprova, oppure contatta il venditore direttamente.',
+                    { parse_mode: 'Markdown' }
+                );
+            } catch (error) {
+                console.error('Error notifying buyer:', error);
+            }
+
+            await ctx.editMessageText('⚠️ Problema pagamento segnalato all\'acquirente.');
         });
     }
 
@@ -1234,6 +1375,34 @@ class CallbackHandler {
     }
 
     setupFeedbackCallbacks() {
+        // CALLBACK PER FEEDBACK ESTERNI (DA MESSAGGI NOTIFICA)
+        this.bot.bot.action(/^feedback_tx_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const transactionId = ctx.match[1];
+            
+            const transaction = await this.bot.transactionService.getTransaction(transactionId);
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            // Verifica che l'utente sia parte della transazione
+            if (ctx.from.id !== transaction.buyerId && ctx.from.id !== transaction.sellerId) {
+                await ctx.answerCbQuery('❌ Non sei autorizzato.', { show_alert: true });
+                return;
+            }
+            
+            ctx.session.completedTransactionId = transactionId;
+            
+            await ctx.editMessageText(
+                Messages.FEEDBACK_REQUEST,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
+                }
+            );
+        });
+
         this.bot.bot.action(/^feedback_([1-5])$/, async (ctx) => {
             const rating = parseInt(ctx.match[1]);
             await ctx.answerCbQuery();
