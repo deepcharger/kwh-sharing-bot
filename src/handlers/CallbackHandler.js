@@ -1124,6 +1124,8 @@ class CallbackHandler {
             ctx.session.waitingFor = 'display_photo';
             ctx.session.waitingForDisplayPhoto = true;
         });
+
+        this.bot.bot.action('charging_failed', async (ctx) => {
             await ctx.answerCbQuery();
             
             const messageText = ctx.callbackQuery.message.text;
