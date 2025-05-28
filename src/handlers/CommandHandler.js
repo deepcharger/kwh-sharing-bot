@@ -214,8 +214,10 @@ class CommandHandler {
                 message += `⏳ **IN CORSO (${pending.length}):**\n`;
                 for (const tx of pending.slice(0, 5)) {
                     const statusEmoji = this.bot.getStatusEmoji(tx.status);
-                    const statusText = this.bot.getStatusText(tx.status);
-                    message += `${statusEmoji} \`${tx.transactionId.slice(-10)}\`\n`;
+                    const statusText = this.bot.getStatusText(tx.status).replace(/_/g, '\\_');
+                    // Escape underscore nell'ID
+                    const displayId = tx.transactionId.slice(-10).replace(/_/g, '\\_');
+                    message += `${statusEmoji} \`${displayId}\`\n`;
                     message += `📊 ${statusText}\n`;
                     message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
                 }
