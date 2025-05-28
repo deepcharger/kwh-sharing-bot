@@ -122,6 +122,155 @@ class CommandHandler {
             });
         });
 
+        // Comando per recuperare transazioni senza feedback
+        this.bot.bot.command('feedback_mancanti', async (ctx) => {
+            const userId = ctx.from.id;
+            
+            // Trova transazioni completate dove l'utente non ha ancora lasciato feedback
+            const transactions = await this.bot.transactionService.getUserTransactions(userId, 'all');
+            const completedTransactions = transactions.filter(t => t.status === 'completed');
+            
+            // Controlla quali non hanno feedback dall'utente corrente
+            const missingFeedback = [];
+            for (const tx of completedTransactions) {
+                const feedbacks = await this.bot.db.getCollection('feedback')
+                    .find({ 
+                        transactionId: tx.transactionId,
+                        fromUserId: userId
+                    }).toArray();
+                    
+                if (feedbacks.length === 0) {
+                    missingFeedback.push(tx);
+                }
+            }
+            
+            if (missingFeedback.length === 0) {
+                await ctx.reply(
+                    '✅ **Nessun feedback mancante!**\n\n' +
+                    'Hai lasciato feedback per tutte le tue transazioni completate.',
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: Keyboards.MAIN_MENU.reply_markup
+                    }
+                );
+                return;
+            }
+            
+            let message = '⭐ **FEEDBACK MANCANTI**\n\n';
+            message += `Hai ${missingFeedback.length} transazioni senza feedback:\n\n`;
+            
+            const keyboard = [];
+            
+            for (const tx of missingFeedback.slice(0, 10)) {
+                const role = tx.sellerId === userId ? 'acquirente' : 'venditore';
+                const date = tx.completedAt ? tx.completedAt.toLocaleDateString('it-IT') : tx.createdAt.toLocaleDateString('it-IT');
+                
+                keyboard.push([{
+                    text: `⭐ Valuta ${role} - ${date}`,
+                    callback_data: `feedback_tx_${tx.transactionId}`
+                }]);
+            }
+            
+            if (missingFeedback.length > 10) {
+                message += `... e altre ${missingFeedback.length - 10} transazioni\n\n`;
+            }
+            
+            keyboard.push([{
+                text: '🏠 Menu principale',
+                callback_data: 'back_to_main'
+            }]);
+            
+            message += 'Seleziona una transazione per lasciare il feedback:';
+            
+            await ctx.reply(message, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: keyboard
+                }
+            });
+        });
+
+        // Command per pagamenti
+        this.bot.bot.command('pagamenti', async (ctx) => {
+            const userId = ctx.from.id;
+            
+            const transactions = await this.bot.transactionService.getUserTransactions(userId, 'all');
+            const paymentPending = transactions.filter(t => 
+                t.status === 'payment_requested' && t.buyerId === userId
+            );
+            
+            if (paymentPending.length === 0) {
+                await this.bot.chatCleaner.sendTemporaryMessage(ctx,
+                    '✅ Non hai pagamenti in sospeso.',
+                    {},
+                    3000
+                );
+                
+                setTimeout(async () => {
+                    await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
+                }, 3000);
+                return;
+            }
+            
+            const announcements = await Promise.all(
+                paymentPending.map(tx => 
+                    this.bot.announcementService.getAnnouncement(tx.announcementId)
+                )
+            );
+            
+            let message = '💳 **PAGAMENTI IN SOSPESO**\n\n';
+            
+            paymentPending.forEach((tx, index) => {
+                const announcement = announcements[index];
+                const amount = announcement && tx.declaredKwh ? 
+                    (tx.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
+                
+                message += `💰 €${amount} (${tx.declaredKwh || 'N/A'} KWH × ${announcement?.price || announcement?.basePrice || '?'}€)\n`;
+                message += `🆔 \`${tx.transactionId.replace(/_/g, '\\_')}\`\n`;
+                message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n`;
+                message += `💳 Metodi: ${announcement?.paymentMethods || 'Come concordato'}\n\n`;
+            });
+            
+            if (paymentPending.length === 1) {
+                const tx = paymentPending[0];
+                const announcement = announcements[0];
+                const amount = announcement && tx.declaredKwh ? 
+                    (tx.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
+                
+                message += `\n💳 **PROCEDI CON IL PAGAMENTO:**\n`;
+                message += `Effettua il pagamento di €${amount} secondo i metodi concordati, poi conferma.`;
+                
+                ctx.session.currentTransactionId = tx.transactionId;
+                
+                await this.bot.chatCleaner.replaceMessage(ctx, message, {
+                    parse_mode: 'Markdown',
+                    reply_markup: Keyboards.getPaymentConfirmationKeyboard().reply_markup,
+                    messageType: 'payment'
+                });
+            } else {
+                const keyboardButtons = paymentPending.map((tx, index) => {
+                    const announcement = announcements[index];
+                    const amount = announcement && tx.declaredKwh ? 
+                        (tx.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
+                    
+                    return [{
+                        text: `💳 ${tx.transactionId.slice(-10).replace(/_/g, '\\_')} - €${amount}`,
+                        callback_data: `select_payment_${tx.transactionId}`
+                    }];
+                });
+                
+                message += 'Seleziona una transazione per gestire il pagamento:';
+                
+                await this.bot.chatCleaner.replaceMessage(ctx, message, {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: keyboardButtons
+                    },
+                    messageType: 'payment'
+                });
+            }
+        });
+
         // Menu button handlers
         this.bot.bot.hears('🔋 Vendi KWH', async (ctx) => {
             // IMPORTANTE: entra nella scene con il nome corretto
@@ -168,7 +317,7 @@ class CommandHandler {
 
             let message = '📊 **I TUOI ANNUNCI ATTIVI:**\n\n';
             for (const ann of announcements) {
-                message += `🆔 \`${ann.announcementId}\`\n`;
+                message += `🆔 \`${ann.announcementId.replace(/_/g, '\\_')}\`\n`;
                 message += `📍 Posizione: \`${ann.location}\`\n`;
                 message += `💰 Prezzo: `;
                 
@@ -262,7 +411,7 @@ class CommandHandler {
                 requestText += `🏢 Brand: ${transaction.brand}\n`;
                 requestText += `📍 Posizione: \`${transaction.location}\`\n`;
                 requestText += `🔌 Connettore: ${transaction.connector}\n\n`;
-                requestText += `🆔 ID Transazione: \`${transaction.transactionId}\``;
+                requestText += `🆔 ID Transazione: \`${transaction.transactionId.replace(/_/g, '\\_')}\``;
                 
                 const keyboard = {
                     inline_keyboard: [
@@ -334,87 +483,6 @@ class CommandHandler {
             
             ctx.session.transactionId = transactionId;
             await this.bot.chatCleaner.enterScene(ctx, 'transactionScene');
-        });
-
-        // Command per pagamenti
-        this.bot.bot.command('pagamenti', async (ctx) => {
-            const userId = ctx.from.id;
-            
-            const transactions = await this.bot.transactionService.getUserTransactions(userId, 'all');
-            const paymentPending = transactions.filter(t => 
-                t.status === 'payment_requested' && t.buyerId === userId
-            );
-            
-            if (paymentPending.length === 0) {
-                await this.bot.chatCleaner.sendTemporaryMessage(ctx,
-                    '✅ Non hai pagamenti in sospeso.',
-                    {},
-                    3000
-                );
-                
-                setTimeout(async () => {
-                    await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
-                }, 3000);
-                return;
-            }
-            
-            const announcements = await Promise.all(
-                paymentPending.map(tx => 
-                    this.bot.announcementService.getAnnouncement(tx.announcementId)
-                )
-            );
-            
-            let message = '💳 **PAGAMENTI IN SOSPESO**\n\n';
-            
-            paymentPending.forEach((tx, index) => {
-                const announcement = announcements[index];
-                const amount = announcement && tx.declaredKwh ? 
-                    (tx.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
-                
-                message += `💰 €${amount} (${tx.declaredKwh || 'N/A'} KWH × ${announcement?.price || announcement?.basePrice || '?'}€)\n`;
-                message += `🆔 \`${tx.transactionId}\`\n`;
-                message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n`;
-                message += `💳 Metodi: ${announcement?.paymentMethods || 'Come concordato'}\n\n`;
-            });
-            
-            if (paymentPending.length === 1) {
-                const tx = paymentPending[0];
-                const announcement = announcements[0];
-                const amount = announcement && tx.declaredKwh ? 
-                    (tx.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
-                
-                message += `\n💳 **PROCEDI CON IL PAGAMENTO:**\n`;
-                message += `Effettua il pagamento di €${amount} secondo i metodi concordati, poi conferma.`;
-                
-                ctx.session.currentTransactionId = tx.transactionId;
-                
-                await this.bot.chatCleaner.replaceMessage(ctx, message, {
-                    parse_mode: 'Markdown',
-                    reply_markup: Keyboards.getPaymentConfirmationKeyboard().reply_markup,
-                    messageType: 'payment'
-                });
-            } else {
-                const keyboardButtons = paymentPending.map((tx, index) => {
-                    const announcement = announcements[index];
-                    const amount = announcement && tx.declaredKwh ? 
-                        (tx.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
-                    
-                    return [{
-                        text: `💳 ${tx.transactionId.slice(-10)} - €${amount}`,
-                        callback_data: `select_payment_${tx.transactionId}`
-                    }];
-                });
-                
-                message += 'Seleziona una transazione per gestire il pagamento:';
-                
-                await this.bot.chatCleaner.replaceMessage(ctx, message, {
-                    parse_mode: 'Markdown',
-                    reply_markup: {
-                        inline_keyboard: keyboardButtons
-                    },
-                    messageType: 'payment'
-                });
-            }
         });
     }
 }
