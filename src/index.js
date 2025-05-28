@@ -285,9 +285,11 @@ class KwhBot {
             'kwh_declared': '📊',
             'payment_requested': '💳',
             'payment_confirmed': '💰',
+            'payment_declared': '💰',
             'completed': '✅',
             'cancelled': '❌',
-            'disputed': '⚠️'
+            'disputed': '⚠️',
+            'buyer_arrived': '📍'
         };
         return statusEmojis[status] || '❓';
     }
@@ -303,9 +305,11 @@ class KwhBot {
             'kwh_declared': 'KWH dichiarati',
             'payment_requested': 'Pagamento richiesto',
             'payment_confirmed': 'Pagamento confermato',
+            'payment_declared': 'Pagamento dichiarato',
             'completed': 'Completata',
             'cancelled': 'Annullata',
-            'disputed': 'In disputa'
+            'disputed': 'In disputa',
+            'buyer_arrived': 'Acquirente arrivato'
         };
         return statusTexts[status] || status;
     }
@@ -318,7 +322,7 @@ class KwhBot {
         const statusEmoji = this.getStatusEmoji(transaction.status);
         
         let details = `💼 **DETTAGLI TRANSAZIONE**\n\n`;
-        details += `🆔 ID: \`${transaction.transactionId}\`\n`;
+        details += `🆔 ID: \`${transaction.transactionId.replace(/_/g, '\\_')}\`\n`;
         details += `👤 Ruolo: **${role}**\n`;
         details += `${statusEmoji} Stato: **${statusText}**\n\n`;
         
