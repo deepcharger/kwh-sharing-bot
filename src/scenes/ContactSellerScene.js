@@ -48,8 +48,8 @@ function createContactSellerScene(bot) {
         }
         message += '\n';
         
-        // Dettagli annuncio
-        message += `🆔 **ID:** \`${announcement.announcementId}\`\n`;
+        // Dettagli annuncio - FIX: Escape underscore nell'ID
+        message += `🆔 **ID:** \`${announcement.announcementId.replace(/_/g, '\\_')}\`\n`;
         
         // Pricing
         if (announcement.pricingType === 'fixed') {
@@ -276,7 +276,8 @@ function createContactSellerScene(bot) {
                 notifyText += `⚡ Tipo: ${data.currentType}\n`;
                 notifyText += `📍 Posizione: \`${data.location}\`\n`;
                 notifyText += `🔌 Connettore: ${data.connector}\n\n`;
-                notifyText += `🔍 ID Transazione: \`${transaction.transactionId}\``;
+                // FIX: Escape underscore nell'ID transazione
+                notifyText += `🔍 ID Transazione: \`${transaction.transactionId.replace(/_/g, '\\_')}\``;
 
                 await ctx.telegram.sendMessage(
                     data.sellerId,
@@ -305,7 +306,7 @@ function createContactSellerScene(bot) {
 
             await ctx.reply(
                 `✅ **RICHIESTA INVIATA!**\n\n` +
-                `🆔 ID Transazione: \`${transaction.transactionId}\`\n\n` +
+                `🆔 ID Transazione: \`${transaction.transactionId.replace(/_/g, '\\_')}\`\n\n` +
                 `Il venditore riceverà una notifica e dovrà confermare la tua richiesta.\n` +
                 `Ti aggiorneremo sullo stato della transazione.`,
                 {
