@@ -56,10 +56,11 @@ function createTransactionScene(bot) {
             return;
         }
 
-        await this.showTransactionStatus(ctx);
+        await showTransactionStatus(ctx, bot);
     });
 
-    scene.showTransactionStatus = async function(ctx) {
+    // Definisci la funzione come funzione normale, non come metodo della scene
+    async function showTransactionStatus(ctx, bot) {
         const { transaction, announcement, isSeller, isBuyer } = ctx.session.transactionData;
         
         let message = `📋 **TRANSAZIONE**\n\n`;
@@ -160,7 +161,7 @@ function createTransactionScene(bot) {
             parse_mode: 'Markdown',
             reply_markup: { inline_keyboard: keyboard }
         });
-    };
+    }
 
     // Gestione azioni
     scene.action('tx_accept', async (ctx) => {
@@ -413,6 +414,32 @@ function createTransactionScene(bot) {
         return ctx.scene.leave();
     });
 
+    scene.action('tx_payment_not_received', async (ctx) => {
+        await ctx.answerCbQuery();
+        const { transaction } = ctx.session.transactionData;
+        
+        await bot.transactionService.addTransactionIssue(
+            transaction.transactionId,
+            'Pagamento non ricevuto dal venditore',
+            ctx.from.id
+        );
+
+        try {
+            await ctx.telegram.sendMessage(
+                transaction.buyerId,
+                `⚠️ **PROBLEMA PAGAMENTO**\n\n` +
+                `Il venditore segnala di non aver ricevuto il pagamento.\n\n` +
+                `Controlla il metodo di pagamento e riprova, oppure contatta il venditore direttamente.`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (error) {
+            console.error('Error notifying buyer:', error);
+        }
+
+        await ctx.editMessageText('⚠️ Problema pagamento segnalato all\'acquirente.');
+        return ctx.scene.leave();
+    });
+
     scene.action('tx_back', async (ctx) => {
         await ctx.answerCbQuery();
         return ctx.scene.leave();
@@ -505,6 +532,9 @@ function createTransactionScene(bot) {
             );
 
             try {
+                const shortId = bot.transactionCache.TransactionCache.generateShortId(transaction.transactionId);
+                bot.transactionCache.set(shortId, transaction.transactionId);
+
                 await ctx.telegram.sendMessage(
                     transaction.sellerId,
                     `📸 **RICARICA COMPLETATA**\n\n` +
@@ -515,8 +545,8 @@ function createTransactionScene(bot) {
                         reply_markup: {
                             inline_keyboard: [
                                 [
-                                    { text: '✅ Corretti', callback_data: `kwh_ok_${bot.transactionCache.TransactionCache.generateShortId(transaction.transactionId)}` },
-                                    { text: '❌ Non corretti', callback_data: `kwh_bad_${bot.transactionCache.TransactionCache.generateShortId(transaction.transactionId)}` }
+                                    { text: '✅ Corretti', callback_data: `kwh_ok_${shortId}` },
+                                    { text: '❌ Non corretti', callback_data: `kwh_bad_${shortId}` }
                                 ]
                             ]
                         }
