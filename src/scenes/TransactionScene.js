@@ -532,7 +532,9 @@ function createTransactionScene(bot) {
             );
 
             try {
-                const shortId = bot.transactionCache.TransactionCache.generateShortId(transaction.transactionId);
+                // Importa la classe TransactionCache per accedere al metodo statico
+                const { TransactionCache } = require('../utils/TransactionCache');
+                const shortId = TransactionCache.generateShortId(transaction.transactionId);
                 bot.transactionCache.set(shortId, transaction.transactionId);
 
                 await ctx.telegram.sendMessage(
