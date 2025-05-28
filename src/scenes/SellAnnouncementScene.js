@@ -262,7 +262,24 @@ function createSellAnnouncementScene(bot) {
 
     scene.action(/^current_(.+)$/, async (ctx) => {
         await ctx.answerCbQuery();
-        const currentType = ctx.match[1].replace('_', ' ').toUpperCase();
+        const currentTypeRaw = ctx.match[1];
+        
+        // Mappa i valori inglesi in italiano
+        let currentType;
+        switch(currentTypeRaw) {
+            case 'dc_only':
+                currentType = 'Solo DC';
+                break;
+            case 'ac_only':
+                currentType = 'Solo AC';
+                break;
+            case 'both':
+                currentType = 'Entrambi (DC e AC)';
+                break;
+            default:
+                currentType = currentTypeRaw.replace('_', ' ');
+        }
+        
         ctx.session.announcementData.currentType = currentType;
         
         await ctx.editMessageText(
