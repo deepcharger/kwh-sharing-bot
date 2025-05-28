@@ -62,11 +62,12 @@ class CallbackHandler {
                 message += `⏳ **IN CORSO (${pending.length}):**\n`;
                 for (const tx of pending.slice(0, 5)) {
                     const statusEmoji = this.bot.getStatusEmoji(tx.status);
-                    // Escape gli underscore nel testo dello stato
+                    // FIX: Escape gli underscore nel testo dello stato
                     const statusText = this.bot.getStatusText(tx.status).replace(/_/g, '\\_');
+                    // FIX: Escape underscore nell'ID
                     const displayId = tx.transactionId.length > 15 ? 
-                        tx.transactionId.substring(2, 12) + '...' : 
-                        tx.transactionId;
+                        tx.transactionId.substring(2, 12).replace(/_/g, '\\_') + '...' : 
+                        tx.transactionId.replace(/_/g, '\\_');
                     message += `${statusEmoji} ${displayId}\n`;
                     message += `📊 ${statusText}\n`;
                     message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
@@ -103,7 +104,8 @@ class CallbackHandler {
 
             let message = '📊 **I TUOI ANNUNCI ATTIVI:**\n\n';
             for (const ann of announcements) {
-                message += `🆔 ${ann.announcementId}\n`;
+                // FIX: Escape underscore nell'ID annuncio
+                message += `🆔 ${ann.announcementId.replace(/_/g, '\\_')}\n`;
                 message += `💰 ${ann.price || ann.basePrice}€/KWH\n`;
                 message += `📅 Pubblicato: ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
             }
@@ -128,9 +130,10 @@ class CallbackHandler {
             if (completed.length > 0) {
                 message += `✅ **COMPLETATE (${completed.length}):**\n`;
                 completed.slice(-10).reverse().forEach(tx => {
+                    // FIX: Escape underscore nell'ID
                     const displayId = tx.transactionId.length > 20 ? 
-                        tx.transactionId.substring(2, 17) + '...' : 
-                        tx.transactionId;
+                        tx.transactionId.substring(2, 17).replace(/_/g, '\\_') + '...' : 
+                        tx.transactionId.replace(/_/g, '\\_');
                     message += `• ${displayId}\n`;
                     message += `  📅 ${tx.completedAt ? tx.completedAt.toLocaleDateString('it-IT') : tx.createdAt.toLocaleDateString('it-IT')}\n`;
                 });
@@ -140,9 +143,10 @@ class CallbackHandler {
             if (cancelled.length > 0) {
                 message += `❌ **ANNULLATE (${cancelled.length}):**\n`;
                 cancelled.slice(-5).reverse().forEach(tx => {
+                    // FIX: Escape underscore nell'ID
                     const displayId = tx.transactionId.length > 20 ? 
-                        tx.transactionId.substring(2, 17) + '...' : 
-                        tx.transactionId;
+                        tx.transactionId.substring(2, 17).replace(/_/g, '\\_') + '...' : 
+                        tx.transactionId.replace(/_/g, '\\_');
                     message += `• ${displayId}\n`;
                     message += `  📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n`;
                 });
@@ -204,7 +208,8 @@ class CallbackHandler {
             
             let message = '⏳ **TRANSAZIONI IN SOSPESO:**\n\n';
             for (const tx of pendingTransactions.slice(0, 10)) {
-                message += `🆔 ${tx.transactionId}\n`;
+                // FIX: Escape underscore nell'ID
+                message += `🆔 ${tx.transactionId.replace(/_/g, '\\_')}\n`;
                 message += `📊 Status: ${tx.status}\n`;
                 message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
             }
@@ -237,7 +242,8 @@ class CallbackHandler {
             
             let message = '⚠️ **DISPUTE APERTE:**\n\n';
             for (const dispute of disputes.slice(0, 5)) {
-                message += `🆔 ${dispute.transactionId}\n`;
+                // FIX: Escape underscore nell'ID
+                message += `🆔 ${dispute.transactionId.replace(/_/g, '\\_')}\n`;
                 message += `⚠️ Issues: ${dispute.issues?.length || 0}\n`;
                 message += `📅 ${dispute.createdAt.toLocaleDateString('it-IT')}\n\n`;
             }
@@ -336,7 +342,7 @@ class CallbackHandler {
                     `🏢 **Brand:** ${transaction.brand}\n` +
                     `🔌 **Connettore:** ${transaction.connector}\n\n` +
                     `⚠️ **IMPORTANTE:** Quando arrivi alla colonnina e sei pronto per ricaricare, premi il bottone sotto per avvisare il venditore.\n\n` +
-                    `🔍 ID Transazione: \`${transactionId}\``,
+                    `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
                     { 
                         parse_mode: 'Markdown',
                         reply_markup: {
@@ -367,7 +373,7 @@ class CallbackHandler {
                             `⏰ **PROMEMORIA**\n\n` +
                             `La tua ricarica è prevista per ${transaction.scheduledDate}.\n\n` +
                             `Quando arrivi alla colonnina, ricordati di premere il bottone per avvisare il venditore!\n\n` +
-                            `🔍 ID Transazione: \`${transactionId}\``,
+                            `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
                             { 
                                 parse_mode: 'Markdown',
                                 reply_markup: {
@@ -417,7 +423,7 @@ class CallbackHandler {
                 `• Verifica che il connettore sia quello giusto\n` +
                 `• Assicurati che l'auto sia pronta per ricevere la ricarica\n` +
                 `• Tieni il cavo a portata di mano\n\n` +
-                `🔍 ID Transazione: \`${transactionId}\``,
+                `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
                 { parse_mode: 'Markdown' }
             );
             
@@ -430,7 +436,7 @@ class CallbackHandler {
                     `📍 **Posizione:** \`${transaction.location}\`\n` +
                     `🏢 **Colonnina:** ${transaction.brand}\n` +
                     `🔌 **Connettore:** ${transaction.connector}\n` +
-                    `🔍 **ID Transazione:** \`${transactionId}\`\n\n` +
+                    `🔍 **ID Transazione:** \`${transactionId.replace(/_/g, '\\_')}\`\n\n` +
                     `È il momento di attivare la ricarica!`,
                     {
                         parse_mode: 'Markdown',
@@ -584,7 +590,7 @@ class CallbackHandler {
                     `L'acquirente @${ctx.from.username || ctx.from.first_name} dichiara di aver pagato.\n\n` +
                     `💰 Importo dichiarato: €${amount}\n` +
                     `⚡ KWH forniti: ${transaction.declaredKwh || 'N/A'}\n` +
-                    `🔍 ID Transazione: \`${transactionId}\`\n\n` +
+                    `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\`\n\n` +
                     `Hai ricevuto il pagamento?`,
                     {
                         parse_mode: 'Markdown',
@@ -643,7 +649,7 @@ class CallbackHandler {
                             parse_mode: 'Markdown',
                             reply_markup: {
                                 inline_keyboard: paymentPending.map((tx, index) => [{
-                                    text: `💰 ${tx.transactionId.slice(-10)} - ${tx.declaredKwh || '?'} KWH`,
+                                    text: `💰 ${tx.transactionId.slice(-10).replace(/_/g, '\\_')} - ${tx.declaredKwh || '?'} KWH`,
                                     callback_data: `confirm_payment_${tx.transactionId}`
                                 }])
                             }
@@ -722,7 +728,7 @@ class CallbackHandler {
                 return;
             }
             
-            const transactionId = transactionIdMatch[1];
+            const transactionId = transactionIdMatch[1].replace(/\\/g, ''); // Rimuovi escape
             const transaction = await this.bot.transactionService.getTransaction(transactionId);
             
             if (!transaction) {
@@ -750,7 +756,7 @@ class CallbackHandler {
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                     Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST + 
-                    `\n\n🔍 ID Transazione: \`${transactionId}\``,
+                    `\n\n🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
@@ -782,7 +788,7 @@ class CallbackHandler {
                 return;
             }
             
-            const transactionId = transactionIdMatch[1];
+            const transactionId = transactionIdMatch[1].replace(/\\/g, ''); // Rimuovi escape
             const transaction = await this.bot.transactionService.getTransaction(transactionId);
             
             if (!transaction) {
@@ -870,7 +876,7 @@ class CallbackHandler {
             
             await ctx.editMessageText(
                 `💳 **PROCEDI CON IL PAGAMENTO**\n\n` +
-                `🆔 Transazione: \`${transactionId}\`\n` +
+                `🆔 Transazione: \`${transactionId.replace(/_/g, '\\_')}\`\n` +
                 `⚡ KWH confermati: ${transaction.declaredKwh || 'N/A'}\n` +
                 `💰 Importo: €${amount}\n` +
                 `💳 Metodi accettati: ${announcement?.paymentMethods || 'Come concordato'}\n\n` +
@@ -919,7 +925,7 @@ class CallbackHandler {
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                     Messages.TRANSACTION_COMPLETED + '\n\n' + Messages.FEEDBACK_REQUEST + 
-                    `\n\n🔍 ID Transazione: \`${transactionId}\``,
+                    `\n\n🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: Keyboards.getFeedbackKeyboard().reply_markup
@@ -1092,7 +1098,8 @@ class CallbackHandler {
             const annTransactions = transactions.filter(t => t.announcementId === announcement.announcementId);
             
             let statsText = `📊 **STATISTICHE ANNUNCIO**\n\n`;
-            statsText += `🆔 ID: ${announcement.announcementId}\n\n`;
+            // FIX: Escape underscore nell'ID
+            statsText += `🆔 ID: ${announcement.announcementId.replace(/_/g, '\\_')}\n\n`;
             statsText += `📈 **Transazioni:**\n`;
             statsText += `• Totali: ${annTransactions.length}\n`;
             statsText += `• Completate: ${annTransactions.filter(t => t.status === 'completed').length}\n`;
@@ -1128,7 +1135,7 @@ class CallbackHandler {
                 return;
             }
             
-            const transactionId = transactionIdMatch[1];
+            const transactionId = transactionIdMatch[1].replace(/\\/g, ''); // Rimuovi escape
             const transaction = await this.bot.transactionService.getTransaction(transactionId);
             
             if (!transaction) {
@@ -1151,7 +1158,7 @@ class CallbackHandler {
                     `• Verifica che il cavo sia inserito bene\n` +
                     `• Controlla che l'auto sia pronta\n` +
                     `• Riprova l'attivazione\n\n` +
-                    `ID Transazione: \`${transactionId}\``,
+                    `ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: Keyboards.getBuyerChargingConfirmKeyboard().reply_markup
@@ -1172,13 +1179,13 @@ class CallbackHandler {
             
             const messageText = ctx.callbackQuery.message.text;
             const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
-            const transactionId = transactionIdMatch ? transactionIdMatch[1] : null;
+            const transactionId = transactionIdMatch ? transactionIdMatch[1].replace(/\\/g, '') : null;
             
             setTimeout(async () => {
                 try {
                     let message = '⏰ Promemoria: È il momento di attivare la ricarica!';
                     if (transactionId) {
-                        message += `\n\nID Transazione: \`${transactionId}\``;
+                        message += `\n\nID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``;
                     }
                     
                     await this.bot.chatCleaner.sendPersistentMessage(
@@ -1211,7 +1218,7 @@ class CallbackHandler {
                 return;
             }
             
-            const transactionId = transactionIdMatch[1];
+            const transactionId = transactionIdMatch[1].replace(/\\/g, ''); // Rimuovi escape
             const transaction = await this.bot.transactionService.getTransaction(transactionId);
             
             if (!transaction) {
@@ -1233,7 +1240,7 @@ class CallbackHandler {
                     `L'acquirente @${ctx.from.username || ctx.from.first_name} ha confermato che la ricarica è in corso.\n\n` +
                     `⚡ La ricarica sta procedendo correttamente.\n` +
                     `⏳ Attendi che l'acquirente completi la ricarica e invii la foto del display.\n\n` +
-                    `🔍 ID Transazione: \`${transactionId}\``,
+                    `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
                     {
                         parse_mode: 'Markdown'
                     }
@@ -1278,7 +1285,7 @@ class CallbackHandler {
                 return;
             }
             
-            const transactionId = transactionIdMatch[1];
+            const transactionId = transactionIdMatch[1].replace(/\\/g, ''); // Rimuovi escape
             const transaction = await this.bot.transactionService.getTransaction(transactionId);
             
             if (!transaction) {
@@ -1291,7 +1298,7 @@ class CallbackHandler {
             try {
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.sellerId } },
-                    Messages.CHARGING_FAILED_RETRY + `\n\nID Transazione: \`${transactionId}\``,
+                    Messages.CHARGING_FAILED_RETRY + `\n\nID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: Keyboards.getRetryActivationKeyboard(retryCount).reply_markup
@@ -1337,7 +1344,7 @@ class CallbackHandler {
                     `💰 Importo: €${amount}\n` +
                     `💳 Metodi accettati: ${announcement?.paymentMethods || 'Come concordato'}\n\n` +
                     `Una volta effettuato il pagamento, premi il pulsante qui sotto.\n\n` +
-                    `🔍 ID Transazione: \`${transaction.transactionId}\``,
+                    `🔍 ID Transazione: \`${transaction.transactionId.replace(/_/g, '\\_')}\``,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: Keyboards.getPaymentConfirmationKeyboard().reply_markup
@@ -1413,7 +1420,7 @@ class CallbackHandler {
             const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
             
             if (transactionIdMatch) {
-                transactionId = transactionIdMatch[1];
+                transactionId = transactionIdMatch[1].replace(/\\/g, ''); // Rimuovi escape
             } else if (ctx.session.completedTransactionId) {
                 transactionId = ctx.session.completedTransactionId;
             } else {
@@ -1693,7 +1700,7 @@ class CallbackHandler {
         const transaction = await this.bot.transactionService.getTransaction(transactionId);
         
         if (!transaction) {
-            await ctx.editMessageText('❌ Transazione non trovata con ID: ' + transactionId);
+            await ctx.editMessageText('❌ Transazione non trovata con ID: ' + transactionId.replace(/_/g, '\\_'));
             return;
         }
         
@@ -1714,7 +1721,7 @@ class CallbackHandler {
                 `L'acquirente @${ctx.from.username || ctx.from.first_name} dichiara di aver pagato.\n\n` +
                 `💰 Importo dichiarato: €${amount}\n` +
                 `⚡ KWH forniti: ${transaction.declaredKwh || 'N/A'}\n` +
-                `🔍 ID Transazione: \`${transactionId}\`\n\n` +
+                `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\`\n\n` +
                 `Hai ricevuto il pagamento?`,
                 {
                     parse_mode: 'Markdown',
@@ -1731,7 +1738,7 @@ class CallbackHandler {
         // Messaggio di conferma che si auto-elimina
         await ctx.editMessageText(
             `✅ **DICHIARAZIONE PAGAMENTO INVIATA!**\n\n` +
-            `🆔 Transazione: \`${transactionId}\`\n` +
+            `🆔 Transazione: \`${transactionId.replace(/_/g, '\\_')}\`\n` +
             `💰 Importo: €${amount}\n\n` +
             `Il venditore riceverà una notifica e dovrà confermare la ricezione del pagamento.\n\n` +
             `Riceverai aggiornamenti sullo stato della transazione.`,
