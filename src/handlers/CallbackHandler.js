@@ -118,34 +118,144 @@ class CallbackHandler {
             const cancelled = transactions.filter(t => t.status === 'cancelled');
             
             let message = '📜 **CRONOLOGIA TRANSAZIONI**\n\n';
+            const keyboard = [];
             
             if (completed.length > 0) {
-                message += `✅ **COMPLETATE (${completed.length}):**\n`;
-                completed.slice(-10).reverse().forEach(tx => {
-                    const displayId = tx.transactionId.length > 20 ? 
-                        tx.transactionId.substring(2, 17) + '...' : 
-                        tx.transactionId;
-                    message += `• \`${displayId}\`\n`;
-                    message += `  📅 ${tx.completedAt ? tx.completedAt.toLocaleDateString('it-IT') : tx.createdAt.toLocaleDateString('it-IT')}\n`;
+                message += `✅ **COMPLETATE (${completed.length}):**\n\n`;
+                
+                // Mostra le ultime 10 transazioni completate con bottoni
+                completed.slice(-10).reverse().forEach((tx, index) => {
+                    const date = tx.completedAt ? tx.completedAt.toLocaleDateString('it-IT') : tx.createdAt.toLocaleDateString('it-IT');
+                    const time = tx.completedAt ? tx.completedAt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '';
+                    
+                    // Ottieni info aggiuntive se disponibili
+                    const kwh = tx.declaredKwh || tx.actualKwh || '?';
+                    const role = tx.sellerId === userId ? '📤' : '📥'; // Vendita o Acquisto
+                    
+                    // Crea short ID e cachelo
+                    const shortId = tx.transactionId.slice(-10);
+                    this.bot.cacheTransactionId(shortId, tx.transactionId);
+                    
+                    // Aggiungi bottone per questa transazione
+                    keyboard.push([{
+                        text: `${role} ${date} ${time} - ${kwh} KWH`,
+                        callback_data: `view_tx_detail_${shortId}`
+                    }]);
                 });
-                message += '\n';
+                
+                if (completed.length > 10) {
+                    message += `\n_...e altre ${completed.length - 10} transazioni completate_\n`;
+                }
             }
             
             if (cancelled.length > 0) {
-                message += `❌ **ANNULLATE (${cancelled.length}):**\n`;
-                cancelled.slice(-5).reverse().forEach(tx => {
-                    const displayId = tx.transactionId.length > 20 ? 
-                        tx.transactionId.substring(2, 17) + '...' : 
-                        tx.transactionId;
-                    message += `• \`${displayId}\`\n`;
-                    message += `  📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n`;
+                message += `\n❌ **ANNULLATE (${cancelled.length}):**\n\n`;
+                
+                // Mostra le ultime 5 transazioni annullate con bottoni
+                cancelled.slice(-5).reverse().forEach((tx, index) => {
+                    const date = tx.createdAt.toLocaleDateString('it-IT');
+                    const reason = tx.cancellationReason ? ' - ' + tx.cancellationReason.substring(0, 20) : '';
+                    
+                    // Crea short ID e cachelo
+                    const shortId = tx.transactionId.slice(-10);
+                    this.bot.cacheTransactionId(shortId, tx.transactionId);
+                    
+                    // Aggiungi bottone per questa transazione
+                    keyboard.push([{
+                        text: `❌ ${date}${reason}`,
+                        callback_data: `view_tx_detail_${shortId}`
+                    }]);
                 });
+                
+                if (cancelled.length > 5) {
+                    message += `\n_...e altre ${cancelled.length - 5} transazioni annullate_\n`;
+                }
             }
+            
+            if (completed.length === 0 && cancelled.length === 0) {
+                message += '_Nessuna transazione nella cronologia_';
+            }
+            
+            // Aggiungi bottone per tornare al menu
+            keyboard.push([{ text: '🏠 Menu principale', callback_data: 'back_to_main' }]);
             
             await this.bot.chatCleaner.editOrReplace(ctx, message, {
                 parse_mode: 'Markdown',
-                reply_markup: Keyboards.getBackToMainMenuKeyboard().reply_markup,
+                reply_markup: { inline_keyboard: keyboard },
                 messageType: 'navigation'
+            });
+        });
+        
+        // Aggiungi nuovo callback per visualizzare i dettagli della transazione dalla cronologia
+        this.bot.bot.action(/^view_tx_detail_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const shortId = ctx.match[1];
+            
+            const transaction = await this.bot.findTransactionByShortId(shortId, ctx.from.id);
+            if (!transaction) {
+                await this.bot.chatCleaner.sendErrorMessage(ctx, '❌ Transazione non trovata.');
+                return;
+            }
+            
+            const announcement = await this.bot.announcementService.getAnnouncement(transaction.announcementId);
+            const userId = ctx.from.id;
+            const isSeller = userId === transaction.sellerId;
+            const role = isSeller ? 'VENDITORE' : 'ACQUIRENTE';
+            
+            let detailText = `📋 **DETTAGLI TRANSAZIONE**\n\n`;
+            detailText += `🆔 ID: \`${transaction.transactionId}\`\n`;
+            detailText += `📊 Stato: ${this.bot.getStatusText(transaction.status)}\n`;
+            detailText += `👤 Ruolo: ${role}\n\n`;
+            
+            detailText += `📅 Data creazione: ${transaction.createdAt.toLocaleDateString('it-IT')}\n`;
+            if (transaction.completedAt) {
+                detailText += `✅ Completata il: ${transaction.completedAt.toLocaleDateString('it-IT')} alle ${transaction.completedAt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}\n`;
+            }
+            
+            detailText += `\n📍 Luogo: ${MarkdownEscape.escape(transaction.location)}\n`;
+            detailText += `🏢 Brand: ${MarkdownEscape.escape(transaction.brand)}\n`;
+            detailText += `🔌 Connettore: ${MarkdownEscape.escape(transaction.connector)}\n`;
+            
+            if (transaction.declaredKwh || transaction.actualKwh) {
+                detailText += `\n⚡ **Energia:**\n`;
+                if (transaction.actualKwh && transaction.actualKwh !== transaction.declaredKwh) {
+                    detailText += `• Ricaricati: ${transaction.actualKwh} KWH\n`;
+                    detailText += `• Fatturati: ${transaction.declaredKwh} KWH (minimo applicato)\n`;
+                } else {
+                    detailText += `• KWH: ${transaction.declaredKwh || transaction.actualKwh}\n`;
+                }
+            }
+            
+            if (announcement && transaction.declaredKwh) {
+                const price = announcement.price || announcement.basePrice;
+                const amount = (transaction.declaredKwh * price).toFixed(2);
+                detailText += `\n💰 **Pagamento:**\n`;
+                detailText += `• Prezzo: ${price}€/KWH\n`;
+                detailText += `• Totale: €${amount}\n`;
+            }
+            
+            // Controlla se manca il feedback
+            const feedbacks = await this.bot.db.getCollection('feedback')
+                .find({ 
+                    transactionId: transaction.transactionId,
+                    fromUserId: userId
+                }).toArray();
+            
+            const keyboard = [];
+            
+            if (feedbacks.length === 0 && transaction.status === 'completed') {
+                keyboard.push([{ 
+                    text: '⭐ Lascia feedback', 
+                    callback_data: `feedback_tx_${transaction.transactionId}` 
+                }]);
+            }
+            
+            keyboard.push([{ text: '🔙 Torna alla cronologia', callback_data: 'tx_history' }]);
+            keyboard.push([{ text: '🏠 Menu principale', callback_data: 'back_to_main' }]);
+            
+            await ctx.editMessageText(detailText, {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: keyboard }
             });
         });
     }
