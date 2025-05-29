@@ -59,8 +59,17 @@ function createSellAnnouncementScene(bot) {
             pricingTiers: []
         };
         await ctx.editMessageText(
-            Messages.formatGraduatedPricingExplanation() + '\n\n' +
-            'Iniziamo con la prima fascia.\nInserisci: `limite_kwh prezzo`\n\nEsempio: `30 0.45`',
+            '📊 **PREZZI GRADUATI - ISTRUZIONI**\n\n' +
+            '**Come funziona:**\n' +
+            'Puoi impostare prezzi diversi per fasce di consumo.\n' +
+            'Chi ricarica di più può avere prezzi migliori!\n\n' +
+            '**Formato:** `limite prezzo` oppure `oltre X prezzo`\n\n' +
+            '**Esempio completo:**\n' +
+            '• `30 0.35` → 1-30 KWH a 0.35€\n' +
+            '• `60 0.30` → 31-60 KWH a 0.30€\n' +
+            '• `oltre 60 0.25` → Oltre 60 KWH a 0.25€\n\n' +
+            '**Iniziamo con la prima fascia:**\n' +
+            'Inserisci limite e prezzo (es: `30 0.35`)',
             { parse_mode: 'Markdown' }
         );
         ctx.session.step = 'graduated_tier';
@@ -134,11 +143,37 @@ function createSellAnnouncementScene(bot) {
             return finishGraduatedTiers(ctx);
         }
 
-        const parts = input.split(/\s+/);
-        if (parts.length !== 2) {
-            await ctx.reply('❌ Formato non valido. Usa: `limite_kwh prezzo`\n\nEsempio: `30 0.45`', 
-                { parse_mode: 'Markdown' });
-            return;
+        // Controlla se è una fascia "oltre"
+        const isOltre = input.toLowerCase().startsWith('oltre ') || input.includes('+');
+        let parts;
+        
+        if (isOltre) {
+            // Gestisci formato "oltre X prezzo" o "X+ prezzo"
+            const cleanInput = input.toLowerCase().replace('oltre ', '').replace('+', ' ').trim();
+            parts = cleanInput.split(/\s+/);
+            
+            if (parts.length !== 2) {
+                await ctx.reply(
+                    '❌ Formato non valido per fascia finale.\n\n' +
+                    'Usa: `oltre limite prezzo` oppure `limite+ prezzo`\n' +
+                    'Esempio: `oltre 60 0.25` oppure `60+ 0.25`', 
+                    { parse_mode: 'Markdown' }
+                );
+                return;
+            }
+        } else {
+            parts = input.split(/\s+/);
+            if (parts.length !== 2) {
+                await ctx.reply(
+                    '❌ Formato non valido.\n\n' +
+                    '**Per fascia normale:** `limite prezzo`\n' +
+                    'Esempio: `30 0.35`\n\n' +
+                    '**Per fascia finale:** `oltre limite prezzo`\n' +
+                    'Esempio: `oltre 60 0.25`', 
+                    { parse_mode: 'Markdown' }
+                );
+                return;
+            }
         }
 
         const limit = parseInt(parts[0]);
@@ -155,11 +190,41 @@ function createSellAnnouncementScene(bot) {
         }
 
         const tiers = ctx.session.announcementData.pricingTiers;
-        if (tiers.length > 0 && limit <= tiers[tiers.length - 1].limit) {
-            await ctx.reply(`❌ Il limite deve essere maggiore di ${tiers[tiers.length - 1].limit}. Riprova:`);
+        
+        // Verifica che il limite sia maggiore del precedente
+        if (tiers.length > 0) {
+            const lastLimit = tiers[tiers.length - 1].limit;
+            if (lastLimit && limit <= lastLimit) {
+                await ctx.reply(`❌ Il limite deve essere maggiore di ${lastLimit}. Riprova:`);
+                return;
+            }
+        }
+
+        // Se è una fascia "oltre", è l'ultima
+        if (isOltre) {
+            tiers.push({ limit: null, price });
+            
+            let message = `✅ Fascia finale aggiunta!\n\n📊 **RIEPILOGO FASCE:**\n`;
+            for (let i = 0; i < tiers.length; i++) {
+                const tier = tiers[i];
+                const prevLimit = i > 0 ? tiers[i-1].limit : 0;
+                if (tier.limit) {
+                    message += `• ${prevLimit + 1}-${tier.limit} KWH: TUTTO a ${tier.price}€/KWH\n`;
+                } else {
+                    message += `• Oltre ${limit} KWH: TUTTO a ${tier.price}€/KWH\n`;
+                }
+            }
+            
+            message += '\n✅ Configurazione prezzi completata!';
+            
+            await ctx.reply(message, { parse_mode: 'Markdown' });
+            
+            // Vai direttamente al prossimo step
+            await finishGraduatedTiers(ctx);
             return;
         }
 
+        // Altrimenti è una fascia normale
         tiers.push({ limit, price });
 
         let message = `✅ Fascia ${tiers.length} aggiunta!\n\n📊 **Fasce configurate:**\n`;
@@ -168,7 +233,10 @@ function createSellAnnouncementScene(bot) {
             message += `• ${prevLimit + 1}-${tiers[i].limit} KWH: TUTTO a ${tiers[i].price}€/KWH\n`;
         }
 
-        message += '\nAggiungi altra fascia o scrivi `fine` per terminare:';
+        message += '\n**Cosa vuoi fare?**\n';
+        message += '• Aggiungi un\'altra fascia intermedia (es: `80 0.28`)\n';
+        message += '• Aggiungi la fascia finale (es: `oltre 80 0.25`)\n';
+        message += '• Scrivi `fine` per terminare senza fascia "oltre"';
 
         await ctx.reply(message, { 
             parse_mode: 'Markdown',
@@ -194,13 +262,64 @@ function createSellAnnouncementScene(bot) {
             return;
         }
 
-        // Aggiungi fascia finale automatica
+        // Controlla se l'ultima fascia è già "oltre" (limit: null)
+        const lastTier = tiers[tiers.length - 1];
+        const hasOltreFascia = lastTier.limit === null;
+
+        // Se non c'è una fascia "oltre", mostra avviso
+        if (!hasOltreFascia) {
+            await ctx.reply(
+                '⚠️ **ATTENZIONE**\n\n' +
+                `Hai configurato fasce fino a ${lastTier.limit} KWH.\n` +
+                `Per chi ricarica oltre ${lastTier.limit} KWH verrà applicato il prezzo di ${lastTier.price}€/KWH.\n\n` +
+                '💡 Se vuoi un prezzo diverso per quantità maggiori, torna indietro e aggiungi una fascia "oltre".',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '✅ Va bene così', callback_data: 'confirm_no_oltre' }],
+                            [{ text: '🔙 Aggiungi fascia oltre', callback_data: 'add_oltre_tier' }]
+                        ]
+                    }
+                }
+            );
+            return;
+        }
+
+        // Se c'è già una fascia "oltre", procedi
+        await askMinimumKwh(ctx);
+    }
+
+    scene.action('confirm_no_oltre', async (ctx) => {
+        await ctx.answerCbQuery();
+        
+        // Aggiungi automaticamente una fascia "oltre" con lo stesso prezzo dell'ultima
+        const tiers = ctx.session.announcementData.pricingTiers;
         const lastTier = tiers[tiers.length - 1];
         tiers.push({ 
             limit: null, 
-            price: Math.max(0.01, lastTier.price - 0.05) 
+            price: lastTier.price
         });
+        
+        await askMinimumKwh(ctx);
+    });
 
+    scene.action('add_oltre_tier', async (ctx) => {
+        await ctx.answerCbQuery();
+        const tiers = ctx.session.announcementData.pricingTiers;
+        const lastLimit = tiers[tiers.length - 1].limit;
+        
+        await ctx.editMessageText(
+            `📊 **AGGIUNGI FASCIA FINALE**\n\n` +
+            `Inserisci il prezzo per chi ricarica oltre ${lastLimit} KWH.\n\n` +
+            `Formato: \`oltre ${lastLimit} prezzo\`\n` +
+            `Esempio: \`oltre ${lastLimit} 0.25\``,
+            { parse_mode: 'Markdown' }
+        );
+        ctx.session.step = 'graduated_tier';
+    });
+
+    async function askMinimumKwh(ctx) {
         await ctx.reply(
             '🎯 **MINIMO GARANTITO** (opzionale)\n\n' +
             'Vuoi impostare un minimo di KWH?',
