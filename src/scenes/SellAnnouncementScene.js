@@ -1,6 +1,7 @@
 const { Scenes } = require('telegraf');
 const Messages = require('../utils/Messages');
 const Keyboards = require('../utils/Keyboards');
+const MarkdownEscape = require('../utils/MarkdownEscape');
 
 function createSellAnnouncementScene(bot) {
     const scene = new Scenes.BaseScene('sellAnnouncementScene');
@@ -458,16 +459,17 @@ function createSellAnnouncementScene(bot) {
             preview += `🎯 Minimo: ${data.minimumKwh} KWH\n`;
         }
         
-        preview += `⚡ Corrente: ${data.currentType}\n`;
-        preview += `📍 Zone: ${data.zones}\n`;
-        preview += `🌐 Reti: ${data.networks}\n`;
+        // FIX: Applica escape ai campi che potrebbero contenere caratteri speciali
+        preview += `⚡ Corrente: ${MarkdownEscape.escape(data.currentType)}\n`;
+        preview += `📍 Zone: ${MarkdownEscape.escape(data.zones)}\n`;
+        preview += `🌐 Reti: ${MarkdownEscape.escape(data.networks)}\n`;
         
         if (data.description) {
-            preview += `📝 Descrizione: ${data.description}\n`;
+            preview += `📝 Descrizione: ${MarkdownEscape.escape(data.description)}\n`;
         }
         
-        preview += `⏰ Disponibilità: ${data.availability}\n`;
-        preview += `💳 Pagamenti: ${data.paymentMethods}\n`;
+        preview += `⏰ Disponibilità: ${MarkdownEscape.escape(data.availability)}\n`;
+        preview += `💳 Pagamenti: ${MarkdownEscape.escape(data.paymentMethods)}\n`;
 
         await ctx.reply(preview, {
             parse_mode: 'Markdown',
