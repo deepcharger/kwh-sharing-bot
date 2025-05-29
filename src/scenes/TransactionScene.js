@@ -1,6 +1,7 @@
 const { Scenes } = require('telegraf');
 const Messages = require('../utils/Messages');
 const Keyboards = require('../utils/Keyboards');
+const MarkdownEscape = require('../utils/MarkdownEscape');
 
 function createTransactionScene(bot) {
     const scene = new Scenes.BaseScene('transactionScene');
@@ -65,7 +66,7 @@ function createTransactionScene(bot) {
         
         let message = `📋 **TRANSAZIONE**\n\n`;
         message += `🆔 ID: \`${transaction.transactionId}\`\n`;
-        message += `📊 Stato: ${bot.getStatusText(transaction.status)}\n`;
+        message += `📊 Stato: ${MarkdownEscape.escape(bot.getStatusText(transaction.status))}\n`;
         message += `📅 Data: ${transaction.createdAt.toLocaleDateString('it-IT')}\n`;
 
         if (transaction.kwhAmount || transaction.declaredKwh) {
@@ -78,9 +79,9 @@ function createTransactionScene(bot) {
             }
         }
 
-        message += `\n📍 Luogo: ${transaction.location}\n`;
-        message += `🏢 Brand: ${transaction.brand}\n`;
-        message += `🔌 Connettore: ${transaction.connector}\n`;
+        message += `\n📍 Luogo: ${MarkdownEscape.escape(transaction.location)}\n`;
+        message += `🏢 Brand: ${MarkdownEscape.escape(transaction.brand)}\n`;
+        message += `🔌 Connettore: ${MarkdownEscape.escape(transaction.connector)}\n`;
 
         let keyboard = [];
 
@@ -205,7 +206,7 @@ function createTransactionScene(bot) {
         try {
             await ctx.telegram.sendMessage(
                 transaction.buyerId,
-                `⚡ **RICARICA ATTIVATA!**\n\nIl venditore ha attivato la ricarica. Conferma se sta funzionando.`,
+                `⚡ **RICARICA ATTIVATA!**\n\nIl venditore ha attivato la ricarica. Conferma se sta funzionando.\n\nID: \`${transaction.transactionId}\``,
                 {
                     parse_mode: 'Markdown',
                     reply_markup: {
@@ -308,7 +309,8 @@ function createTransactionScene(bot) {
                 `✅ **KWH CONFERMATI**\n\n` +
                 `Il venditore ha confermato ${updatedTx.declaredKwh} KWH.\n` +
                 `💰 Totale da pagare: €${amount}\n\n` +
-                `Procedi con il pagamento come concordato.`,
+                `Procedi con il pagamento come concordato.\n\n` +
+                `ID: \`${transaction.transactionId}\``,
                 {
                     parse_mode: 'Markdown',
                     reply_markup: {
@@ -352,7 +354,8 @@ function createTransactionScene(bot) {
                 transaction.sellerId,
                 `💳 **PAGAMENTO DICHIARATO**\n\n` +
                 `L'acquirente dichiara di aver effettuato il pagamento.\n` +
-                `Conferma la ricezione del pagamento.`,
+                `Conferma la ricezione del pagamento.\n\n` +
+                `ID: \`${transaction.transactionId}\``,
                 {
                     parse_mode: 'Markdown',
                     reply_markup: {
@@ -396,7 +399,7 @@ function createTransactionScene(bot) {
         try {
             await ctx.telegram.sendMessage(
                 transaction.buyerId,
-                `🎉 **TRANSAZIONE COMPLETATA!**\n\nGrazie per aver utilizzato il nostro servizio. Lascia un feedback!`,
+                `🎉 **TRANSAZIONE COMPLETATA!**\n\nGrazie per aver utilizzato il nostro servizio. Lascia un feedback!\n\nID: \`${transaction.transactionId}\``,
                 {
                     parse_mode: 'Markdown',
                     reply_markup: {
@@ -440,7 +443,7 @@ function createTransactionScene(bot) {
         return ctx.scene.leave();
     });
 
-    // FIX: Bottone Indietro - torna alla lista delle transazioni
+    // Bottone Indietro - torna alla lista delle transazioni
     scene.action('tx_back', async (ctx) => {
         await ctx.answerCbQuery();
         
@@ -478,14 +481,11 @@ function createTransactionScene(bot) {
         
         if (pending.length > 0) {
             message += `⏳ **IN CORSO (${pending.length}):**\n`;
-            for (const tx of pending.slice(0, 5)) {
-                const statusEmoji = bot.getStatusEmoji(tx.status);
-                const statusText = bot.getStatusText(tx.status).replace(/_/g, '\\_');
-                const displayId = tx.transactionId.slice(-10).replace(/_/g, '\\_');
-                message += `${statusEmoji} \`${displayId}\`\n`;
-                message += `📊 ${statusText}\n`;
-                message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
-            }
+            message += MarkdownEscape.formatTransactionList(
+                pending.slice(0, 5),
+                bot.getStatusEmoji.bind(bot),
+                bot.getStatusText.bind(bot)
+            );
         }
         
         message += `✅ **Completate:** ${completed.length}\n`;
@@ -556,7 +556,7 @@ function createTransactionScene(bot) {
             try {
                 await ctx.telegram.sendMessage(
                     transaction.buyerId,
-                    `❌ **Richiesta rifiutata**\n\nMotivo: ${text}`,
+                    `❌ **Richiesta rifiutata**\n\nMotivo: ${MarkdownEscape.escape(text)}`,
                     { parse_mode: 'Markdown' }
                 );
             } catch (error) {
@@ -593,7 +593,8 @@ function createTransactionScene(bot) {
                     transaction.sellerId,
                     `📸 **RICARICA COMPLETATA**\n\n` +
                     `L'acquirente dichiara ${kwhAmount} KWH.\n` +
-                    `Verifica la foto e conferma.`,
+                    `Verifica la foto e conferma.\n\n` +
+                    `ID: \`${transaction.transactionId}\``,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: {
@@ -632,7 +633,7 @@ function createTransactionScene(bot) {
                 await ctx.telegram.sendMessage(
                     transaction.buyerId,
                     `⚠️ **Problema con i KWH dichiarati**\n\n` +
-                    `Il venditore segnala: ${text}\n\n` +
+                    `Il venditore segnala: ${MarkdownEscape.escape(text)}\n\n` +
                     `Controlla nuovamente la foto e rispondi al venditore.`,
                     { parse_mode: 'Markdown' }
                 );
