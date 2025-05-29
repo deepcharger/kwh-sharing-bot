@@ -1,5 +1,6 @@
 const Messages = require('../utils/Messages');
 const Keyboards = require('../utils/Keyboards');
+const MarkdownEscape = require('../utils/MarkdownEscape');
 
 class CommandHandler {
     constructor(bot) {
@@ -226,9 +227,9 @@ class CommandHandler {
                     (tx.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
                 
                 message += `💰 €${amount} (${tx.declaredKwh || 'N/A'} KWH × ${announcement?.price || announcement?.basePrice || '?'}€)\n`;
-                message += `🆔 \`${tx.transactionId.replace(/_/g, '\\_')}\`\n`;
+                message += `🆔 \`${tx.transactionId}\`\n`;
                 message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n`;
-                message += `💳 Metodi: ${announcement?.paymentMethods || 'Come concordato'}\n\n`;
+                message += `💳 Metodi: ${MarkdownEscape.escape(announcement?.paymentMethods || 'Come concordato')}\n\n`;
             });
             
             if (paymentPending.length === 1) {
@@ -254,7 +255,7 @@ class CommandHandler {
                         (tx.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
                     
                     return [{
-                        text: `💳 ${tx.transactionId.slice(-10).replace(/_/g, '\\_')} - €${amount}`,
+                        text: `💳 \`${tx.transactionId.slice(-10)}\` - €${amount}`,
                         callback_data: `select_payment_${tx.transactionId}`
                     }];
                 });
@@ -317,7 +318,7 @@ class CommandHandler {
 
             let message = '📊 **I TUOI ANNUNCI ATTIVI:**\n\n';
             for (const ann of announcements) {
-                message += `🆔 \`${ann.announcementId.replace(/_/g, '\\_')}\`\n`;
+                message += `🆔 \`${ann.announcementId}\`\n`;
                 message += `📍 Posizione: \`${ann.location}\`\n`;
                 message += `💰 Prezzo: `;
                 
@@ -361,15 +362,11 @@ class CommandHandler {
             
             if (pending.length > 0) {
                 message += `⏳ **IN CORSO (${pending.length}):**\n`;
-                for (const tx of pending.slice(0, 5)) {
-                    const statusEmoji = this.bot.getStatusEmoji(tx.status);
-                    const statusText = this.bot.getStatusText(tx.status).replace(/_/g, '\\_');
-                    // Escape underscore nell'ID
-                    const displayId = tx.transactionId.slice(-10).replace(/_/g, '\\_');
-                    message += `${statusEmoji} \`${displayId}\`\n`;
-                    message += `📊 ${statusText}\n`;
-                    message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
-                }
+                message += MarkdownEscape.formatTransactionList(
+                    pending.slice(0, 5),
+                    this.bot.getStatusEmoji.bind(this.bot),
+                    this.bot.getStatusText.bind(this.bot)
+                );
             }
             
             message += `✅ **Completate:** ${completed.length}\n`;
@@ -401,44 +398,20 @@ class CommandHandler {
 
             await this.bot.chatCleaner.cleanupUserMessages(ctx, ['temporary', 'navigation']);
 
-            // Funzione helper per escape di tutti i caratteri speciali Markdown
-            const escapeMarkdown = (text) => {
-                if (!text) return '';
-                return text
-                    .replace(/\\/g, '\\\\')  // Backslash
-                    .replace(/\*/g, '\\*')   // Asterisco
-                    .replace(/_/g, '\\_')    // Underscore
-                    .replace(/\[/g, '\\[')   // Parentesi quadra aperta
-                    .replace(/\]/g, '\\]')   // Parentesi quadra chiusa
-                    .replace(/\(/g, '\\(')   // Parentesi tonda aperta
-                    .replace(/\)/g, '\\)')   // Parentesi tonda chiusa
-                    .replace(/~/g, '\\~')    // Tilde
-                    .replace(/`/g, '\\`')    // Backtick
-                    .replace(/>/g, '\\>')    // Maggiore
-                    .replace(/#/g, '\\#')    // Hash
-                    .replace(/\+/g, '\\+')   // Più
-                    .replace(/-/g, '\\-')    // Meno
-                    .replace(/=/g, '\\=')    // Uguale
-                    .replace(/\|/g, '\\|')   // Pipe
-                    .replace(/\{/g, '\\{')   // Parentesi graffa aperta
-                    .replace(/\}/g, '\\}')   // Parentesi graffa chiusa
-                    .replace(/\./g, '\\.')   // Punto
-                    .replace(/!/g, '\\!');   // Punto esclamativo
-            };
-
             for (const transaction of pendingRequests) {
                 const buyer = await this.bot.userService.getUser(transaction.buyerId);
                 const announcement = await this.bot.announcementService.getAnnouncement(transaction.announcementId);
                 
-                let requestText = `📥 **NUOVA RICHIESTA DI ACQUISTO**\n\n`;
-                requestText += `👤 Acquirente: @${buyer?.username || buyer?.firstName || 'utente'}\n`;
-                requestText += `📅 Data/ora: ${transaction.scheduledDate}\n`;
-                requestText += `🏢 Brand: ${escapeMarkdown(transaction.brand)}\n`;
-                requestText += `📍 Posizione: \`${transaction.location}\`\n`;
-                // FIX: Escape dei caratteri speciali nel connettore
-                requestText += `🔌 Connettore: ${escapeMarkdown(transaction.connector)}\n\n`;
-                // FIX: Escape underscore nell'ID
-                requestText += `🆔 ID Transazione: \`${transaction.transactionId.replace(/_/g, '\\_')}\``;
+                let requestText = MarkdownEscape.formatPurchaseRequest({
+                    username: buyer?.username,
+                    firstName: buyer?.firstName,
+                    scheduledDate: transaction.scheduledDate,
+                    brand: transaction.brand,
+                    currentType: transaction.currentType,
+                    location: transaction.location,
+                    connector: transaction.connector,
+                    transactionId: transaction.transactionId
+                });
                 
                 const keyboard = {
                     inline_keyboard: [
