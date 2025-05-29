@@ -103,6 +103,25 @@ function createTransactionScene(bot) {
                     keyboard = [
                         [{ text: '⚡ Attiva ricarica', callback_data: 'tx_activate_charging' }]
                     ];
+                } else if (isBuyer) {
+                    // Mostra bottone per confermare arrivo
+                    keyboard = [
+                        [{ text: '📍 Sono arrivato alla colonnina', callback_data: 'tx_arrived_at_station' }]
+                    ];
+                }
+                break;
+
+            case 'buyer_arrived':
+                if (isSeller) {
+                    // QUESTO È IL FIX PRINCIPALE - Mostra i bottoni di attivazione
+                    keyboard = [
+                        [{ text: '⚡ Attiva ricarica ORA', callback_data: 'tx_activate_charging' }],
+                        [{ text: '⏸️ Ritarda di 5 min', callback_data: 'tx_delay_charging' }],
+                        [{ text: '❌ Problemi tecnici', callback_data: 'tx_technical_issues' }]
+                    ];
+                    message += '\n\n⏰ **L\'ACQUIRENTE È ARRIVATO!**\nÈ il momento di attivare la ricarica.';
+                } else if (isBuyer) {
+                    message += '\n\n⏳ In attesa che il venditore attivi la ricarica...';
                 }
                 break;
 
@@ -194,6 +213,56 @@ function createTransactionScene(bot) {
         ctx.session.waitingFor = 'rejection_reason';
     });
 
+    // NUOVO: Gestione arrivo acquirente dalla scene
+    scene.action('tx_arrived_at_station', async (ctx) => {
+        await ctx.answerCbQuery();
+        const { transaction } = ctx.session.transactionData;
+        
+        await bot.transactionService.updateTransactionStatus(
+            transaction.transactionId,
+            'buyer_arrived'
+        );
+        
+        // Notifica il venditore
+        try {
+            await bot.chatCleaner.sendPersistentMessage(
+                { telegram: ctx.telegram, from: { id: transaction.sellerId } },
+                `⏰ **L'ACQUIRENTE È ARRIVATO!**\n\n` +
+                `L'acquirente @${MarkdownEscape.escape(ctx.from.username || ctx.from.first_name)} è arrivato alla colonnina ed è pronto per ricaricare.\n\n` +
+                `📍 **Posizione:** \`${transaction.location}\`\n` +
+                `🏢 **Colonnina:** ${MarkdownEscape.escape(transaction.brand)}\n` +
+                `🔌 **Connettore:** ${MarkdownEscape.escape(transaction.connector)}\n` +
+                `🔍 **ID Transazione:** \`${transaction.transactionId}\`\n\n` +
+                `È il momento di attivare la ricarica!`,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '⚡ Attiva ricarica ORA', callback_data: `activate_charging_${transaction.transactionId}` }],
+                            [{ text: '⏸️ Ritarda di 5 min', callback_data: `delay_charging_${transaction.transactionId}` }],
+                            [{ text: '❌ Problemi tecnici', callback_data: `technical_issues_${transaction.transactionId}` }]
+                        ]
+                    }
+                }
+            );
+        } catch (error) {
+            console.error('Error notifying seller:', error);
+        }
+        
+        await ctx.editMessageText(
+            `✅ **CONFERMATO!**\n\n` +
+            `Il venditore è stato avvisato che sei arrivato alla colonnina.\n\n` +
+            `⏳ Attendi che il venditore attivi la ricarica.\n\n` +
+            `💡 **Suggerimenti:**\n` +
+            `• Verifica che il connettore sia quello giusto\n` +
+            `• Assicurati che l'auto sia pronta per ricevere la ricarica\n` +
+            `• Tieni il cavo a portata di mano`,
+            { parse_mode: 'Markdown' }
+        );
+        
+        return ctx.scene.leave();
+    });
+
     scene.action('tx_activate_charging', async (ctx) => {
         await ctx.answerCbQuery();
         const { transaction } = ctx.session.transactionData;
@@ -224,6 +293,65 @@ function createTransactionScene(bot) {
         }
 
         await ctx.editMessageText('⚡ Ricarica attivata! In attesa della conferma dell\'acquirente.');
+        return ctx.scene.leave();
+    });
+
+    // Gestione ritardo
+    scene.action('tx_delay_charging', async (ctx) => {
+        await ctx.answerCbQuery();
+        const { transaction } = ctx.session.transactionData;
+        
+        setTimeout(async () => {
+            try {
+                await bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: ctx.from.id } },
+                    `⏰ **PROMEMORIA**\n\nÈ il momento di attivare la ricarica!\n\nID Transazione: \`${transaction.transactionId}\``,
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '⚡ Attiva ricarica ORA', callback_data: `activate_charging_${transaction.transactionId}` }]
+                            ]
+                        }
+                    }
+                );
+            } catch (error) {
+                console.error('Error sending delayed reminder:', error);
+            }
+        }, 5 * 60 * 1000); // 5 minuti
+        
+        await ctx.editMessageText(
+            '⏸️ Ricarica rimandata di 5 minuti.\n\nRiceverai un promemoria quando sarà il momento di attivare.',
+            { parse_mode: 'Markdown' }
+        );
+        
+        return ctx.scene.leave();
+    });
+
+    // Gestione problemi tecnici
+    scene.action('tx_technical_issues', async (ctx) => {
+        await ctx.answerCbQuery();
+        const { transaction } = ctx.session.transactionData;
+        
+        await bot.transactionService.addTransactionIssue(
+            transaction.transactionId,
+            'Problemi tecnici segnalati dal venditore',
+            ctx.from.id
+        );
+        
+        try {
+            await ctx.telegram.sendMessage(
+                transaction.buyerId,
+                `⚠️ **PROBLEMI TECNICI**\n\n` +
+                `Il venditore segnala problemi tecnici con l'attivazione.\n` +
+                `Attendere ulteriori comunicazioni o contattare il venditore.`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (error) {
+            console.error('Error notifying buyer:', error);
+        }
+        
+        await ctx.editMessageText('⚠️ Problema tecnico segnalato all\'acquirente.');
         return ctx.scene.leave();
     });
 
