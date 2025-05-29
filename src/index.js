@@ -27,6 +27,7 @@ const Keyboards = require('./utils/Keyboards');
 const Messages = require('./utils/Messages');
 const { TransactionCache } = require('./utils/TransactionCache');
 const ChatCleaner = require('./utils/ChatCleaner');
+const MarkdownEscape = require('./utils/MarkdownEscape');
 
 class KwhBot {
     constructor() {
@@ -314,6 +315,7 @@ class KwhBot {
         return statusTexts[status] || status;
     }
 
+    // FIX: Metodo aggiornato per formattare dettagli transazione
     formatTransactionDetails(transaction, announcement, currentUserId) {
         const isSeller = currentUserId === transaction.sellerId;
         const role = isSeller ? 'VENDITORE' : 'ACQUIRENTE';
@@ -321,19 +323,8 @@ class KwhBot {
         const statusText = this.getStatusText(transaction.status);
         const statusEmoji = this.getStatusEmoji(transaction.status);
         
-        let details = `💼 **DETTAGLI TRANSAZIONE**\n\n`;
-        details += `🆔 ID: \`${transaction.transactionId.replace(/_/g, '\\_')}\`\n`;
-        details += `👤 Ruolo: **${role}**\n`;
-        details += `${statusEmoji} Stato: **${statusText}**\n\n`;
-        
-        details += `📅 Data ricarica: ${transaction.scheduledDate}\n`;
-        details += `🏢 Brand: ${transaction.brand}\n`;
-        details += `📍 Posizione: ${transaction.location}\n`;
-        details += `🔌 Connettore: ${transaction.connector}\n\n`;
-        
-        if (announcement) {
-            details += `💰 Prezzo: ${announcement.price || announcement.basePrice}€/KWH\n`;
-        }
+        // Usa MarkdownEscape per formattare correttamente
+        let details = MarkdownEscape.formatTransactionDetails(transaction, role, statusText, statusEmoji);
         
         if (transaction.declaredKwh) {
             details += `⚡ KWH dichiarati: ${transaction.declaredKwh}\n`;
@@ -353,7 +344,7 @@ class KwhBot {
             case 'payment_requested':
                 if (!isSeller) {
                     details += `\n💳 **AZIONE RICHIESTA:** Effettua il pagamento\n`;
-                    details += `Metodi: ${announcement?.paymentMethods || 'Come concordato'}`;
+                    details += `Metodi: ${MarkdownEscape.escape(announcement?.paymentMethods || 'Come concordato')}`;
                 } else {
                     details += `\n⏳ In attesa del pagamento dall'acquirente`;
                 }
