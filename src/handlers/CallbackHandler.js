@@ -212,7 +212,16 @@ class CallbackHandler {
                 detailText += `✅ Completata il: ${transaction.completedAt.toLocaleDateString('it-IT')} alle ${transaction.completedAt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}\n`;
             }
             
-            detailText += `\n📍 Luogo: ${MarkdownEscape.escape(transaction.location)}\n`;
+            // Gestione posizione con Google Maps
+            if (transaction.locationCoords && transaction.locationCoords.latitude && transaction.locationCoords.longitude) {
+                const lat = transaction.locationCoords.latitude;
+                const lng = transaction.locationCoords.longitude;
+                detailText += `\n📍 **Posizione:** [Apri in Google Maps](https://www.google.com/maps?q=${lat},${lng})\n`;
+                detailText += `🧭 Coordinate: \`${lat}, ${lng}\`\n`;
+            } else if (transaction.location) {
+                detailText += `\n📍 Luogo: ${MarkdownEscape.escape(transaction.location)}\n`;
+            }
+            
             detailText += `🏢 Brand: ${MarkdownEscape.escape(transaction.brand)}\n`;
             detailText += `🔌 Connettore: ${MarkdownEscape.escape(transaction.connector)}\n`;
             
@@ -255,6 +264,7 @@ class CallbackHandler {
             
             await ctx.editMessageText(detailText, {
                 parse_mode: 'Markdown',
+                disable_web_page_preview: true,
                 reply_markup: { inline_keyboard: keyboard }
             });
         });
@@ -432,17 +442,30 @@ class CallbackHandler {
 
             try {
                 // Notifica l'acquirente con il nuovo messaggio e bottone
-                await this.bot.chatCleaner.sendPersistentMessage(
-                    { telegram: ctx.telegram, from: { id: transaction.buyerId } },
-                    `✅ **RICHIESTA ACCETTATA!**\n\n` +
-                    `Il venditore ha confermato la tua richiesta per ${MarkdownEscape.escape(transaction.scheduledDate)}.\n\n` +
-                    `📍 **Posizione:** \`${transaction.location}\`\n` +
-                    `🏢 **Brand:** ${MarkdownEscape.escape(transaction.brand)}\n` +
+                let buyerMessage = `✅ **RICHIESTA ACCETTATA!**\n\n` +
+                    `Il venditore ha confermato la tua richiesta per ${MarkdownEscape.escape(transaction.scheduledDate)}.\n\n`;
+                
+                // Aggiungi link Google Maps se ci sono coordinate
+                if (transaction.locationCoords && transaction.locationCoords.latitude && transaction.locationCoords.longitude) {
+                    const lat = transaction.locationCoords.latitude;
+                    const lng = transaction.locationCoords.longitude;
+                    buyerMessage += `📍 **Posizione:** [Apri in Google Maps](https://www.google.com/maps?q=${lat},${lng})\n`;
+                    buyerMessage += `🧭 Coordinate: \`${lat}, ${lng}\`\n`;
+                } else if (transaction.location) {
+                    buyerMessage += `📍 **Posizione:** \`${transaction.location}\`\n`;
+                }
+                
+                buyerMessage += `🏢 **Brand:** ${MarkdownEscape.escape(transaction.brand)}\n` +
                     `🔌 **Connettore:** ${MarkdownEscape.escape(transaction.connector)}\n\n` +
                     `⚠️ **IMPORTANTE:** Quando arrivi alla colonnina e sei pronto per ricaricare, premi il bottone sotto per avvisare il venditore.\n\n` +
-                    `🔍 ID Transazione: \`${transactionId}\``,
+                    `🔍 ID Transazione: \`${transactionId}\``;
+                
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.buyerId } },
+                    buyerMessage,
                     { 
                         parse_mode: 'Markdown',
+                        disable_web_page_preview: true,
                         reply_markup: {
                             inline_keyboard: [
                                 [{ text: '📍 Sono arrivato alla colonnina', callback_data: `arrived_at_station_${transactionId}` }]
@@ -513,31 +536,57 @@ class CallbackHandler {
             );
             
             // Conferma all'acquirente
-            await ctx.editMessageText(
-                `✅ **CONFERMATO!**\n\n` +
-                `Il venditore è stato avvisato che sei arrivato alla colonnina.\n\n` +
-                `⏳ Attendi che il venditore attivi la ricarica.\n\n` +
+            let confirmMessage = `✅ **CONFERMATO!**\n\n` +
+                `Il venditore è stato avvisato che sei arrivato alla colonnina.\n\n`;
+            
+            // Aggiungi link Google Maps se ci sono coordinate
+            if (transaction.locationCoords && transaction.locationCoords.latitude && transaction.locationCoords.longitude) {
+                const lat = transaction.locationCoords.latitude;
+                const lng = transaction.locationCoords.longitude;
+                confirmMessage += `📍 **Posizione:** [Apri in Google Maps](https://www.google.com/maps?q=${lat},${lng})\n`;
+                confirmMessage += `🧭 Coordinate: \`${lat}, ${lng}\`\n\n`;
+            } else if (transaction.location) {
+                confirmMessage += `📍 **Posizione:** \`${transaction.location}\`\n\n`;
+            }
+            
+            confirmMessage += `⏳ Attendi che il venditore attivi la ricarica.\n\n` +
                 `💡 **Suggerimenti:**\n` +
                 `• Verifica che il connettore sia quello giusto\n` +
                 `• Assicurati che l'auto sia pronta per ricevere la ricarica\n` +
                 `• Tieni il cavo a portata di mano\n\n` +
-                `🔍 ID Transazione: \`${transactionId}\``,
-                { parse_mode: 'Markdown' }
-            );
+                `🔍 ID Transazione: \`${transactionId}\``;
+            
+            await ctx.editMessageText(confirmMessage, { 
+                parse_mode: 'Markdown',
+                disable_web_page_preview: true 
+            });
             
             // Notifica il venditore
             try {
-                await this.bot.chatCleaner.sendPersistentMessage(
-                    { telegram: ctx.telegram, from: { id: transaction.sellerId } },
-                    `⏰ **L'ACQUIRENTE È ARRIVATO!**\n\n` +
-                    `L'acquirente @${MarkdownEscape.escape(ctx.from.username || ctx.from.first_name)} è arrivato alla colonnina ed è pronto per ricaricare.\n\n` +
-                    `📍 **Posizione:** \`${transaction.location}\`\n` +
-                    `🏢 **Colonnina:** ${MarkdownEscape.escape(transaction.brand)}\n` +
+                let sellerMessage = `⏰ **L'ACQUIRENTE È ARRIVATO!**\n\n` +
+                    `L'acquirente @${MarkdownEscape.escape(ctx.from.username || ctx.from.first_name)} è arrivato alla colonnina ed è pronto per ricaricare.\n\n`;
+                
+                // Aggiungi link Google Maps se ci sono coordinate
+                if (transaction.locationCoords && transaction.locationCoords.latitude && transaction.locationCoords.longitude) {
+                    const lat = transaction.locationCoords.latitude;
+                    const lng = transaction.locationCoords.longitude;
+                    sellerMessage += `📍 **Posizione:** [Apri in Google Maps](https://www.google.com/maps?q=${lat},${lng})\n`;
+                    sellerMessage += `🧭 Coordinate: \`${lat}, ${lng}\`\n`;
+                } else if (transaction.location) {
+                    sellerMessage += `📍 **Posizione:** \`${transaction.location}\`\n`;
+                }
+                
+                sellerMessage += `🏢 **Colonnina:** ${MarkdownEscape.escape(transaction.brand)}\n` +
                     `🔌 **Connettore:** ${MarkdownEscape.escape(transaction.connector)}\n` +
                     `🔍 **ID Transazione:** \`${transactionId}\`\n\n` +
-                    `È il momento di attivare la ricarica!`,
+                    `È il momento di attivare la ricarica!`;
+                
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.sellerId } },
+                    sellerMessage,
                     {
                         parse_mode: 'Markdown',
+                        disable_web_page_preview: true,
                         reply_markup: {
                             inline_keyboard: [
                                 [{ text: '⚡ Attiva ricarica ORA', callback_data: `activate_charging_${transactionId}` }],
@@ -640,11 +689,22 @@ class CallbackHandler {
                 detailText += `💰 Prezzo: ${announcement.price || announcement.basePrice}€/KWH\n`;
             }
             
+            // Gestione posizione con Google Maps
+            if (transaction.locationCoords && transaction.locationCoords.latitude && transaction.locationCoords.longitude) {
+                const lat = transaction.locationCoords.latitude;
+                const lng = transaction.locationCoords.longitude;
+                detailText += `\n📍 **Posizione:** [Apri in Google Maps](https://www.google.com/maps?q=${lat},${lng})\n`;
+                detailText += `🧭 Coordinate: \`${lat}, ${lng}\`\n`;
+            } else if (transaction.location) {
+                detailText += `\n📍 Posizione: \`${transaction.location}\`\n`;
+            }
+            
             const shortId = transaction.transactionId.slice(-10);
             this.bot.cacheTransactionId(shortId, transaction.transactionId);
             
             await this.bot.chatCleaner.editOrReplace(ctx, detailText, {
                 parse_mode: 'Markdown',
+                disable_web_page_preview: true,
                 reply_markup: Keyboards.getTransactionActionsKeyboard(transaction.transactionId, transaction.status, userId === transaction.sellerId).reply_markup,
                 messageType: 'transaction_details'
             });
