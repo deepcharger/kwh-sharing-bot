@@ -1678,7 +1678,7 @@ class CallbackHandler {
             );
         });
 
-        // KWH validation callbacks
+        // KWH validation callbacks - FIX PER I MINIMI GARANTITI
         this.bot.bot.action(/^kwh_ok_(.+)$/, async (ctx) => {
             await ctx.answerCbQuery();
             const shortId = ctx.match[1];
@@ -1697,18 +1697,29 @@ class CallbackHandler {
             const announcement = await this.bot.announcementService.getAnnouncement(transaction.announcementId);
 
             try {
+                // IMPORTANTE: Qui il declaredKwh è già stato calcolato con il minimo applicato nella TransactionScene
                 const amount = announcement && transaction.declaredKwh ? 
                     (transaction.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
                 
-                await this.bot.chatCleaner.sendPersistentMessage(
-                    { telegram: ctx.telegram, from: { id: transaction.buyerId } },
-                    `✅ *KWH CONFERMATI DAL VENDITORE*\n\n` +
-                    `Il venditore ha confermato la ricezione di ${transaction.declaredKwh || 'N/A'} KWH.\n\n` +
-                    `💳 *Procedi con il pagamento*\n` +
+                // Prepara il messaggio per l'acquirente
+                let buyerMessage = `✅ **KWH CONFERMATI DAL VENDITORE**\n\n`;
+                
+                // Se è stato applicato il minimo, notifica chiaramente l'acquirente
+                if (transaction.actualKwh && transaction.actualKwh < transaction.declaredKwh) {
+                    buyerMessage += `⚠️ **ATTENZIONE:** Hai ricaricato ${transaction.actualKwh} KWH ma pagherai per il minimo garantito di ${transaction.declaredKwh} KWH come da condizioni dell'annuncio.\n\n`;
+                } else {
+                    buyerMessage += `Il venditore ha confermato la ricezione di ${transaction.declaredKwh} KWH.\n\n`;
+                }
+                
+                buyerMessage += `💳 **Procedi con il pagamento**\n` +
                     `💰 Importo: €${amount}\n` +
                     `💳 Metodi accettati: ${MarkdownEscape.escape(announcement?.paymentMethods || 'Come concordato')}\n\n` +
                     `Una volta effettuato il pagamento, premi il pulsante qui sotto.\n\n` +
-                    `🔍 ID Transazione: \`${transaction.transactionId}\``,
+                    `🔍 ID Transazione: \`${transaction.transactionId}\``;
+                
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.buyerId } },
+                    buyerMessage,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: Keyboards.getPaymentConfirmationKeyboard().reply_markup
