@@ -1,5 +1,6 @@
 const Messages = require('../utils/Messages');
 const Keyboards = require('../utils/Keyboards');
+const MarkdownEscape = require('../utils/MarkdownEscape');
 
 class CallbackHandler {
     constructor(bot) {
@@ -60,18 +61,11 @@ class CallbackHandler {
             
             if (pending.length > 0) {
                 message += `⏳ **IN CORSO (${pending.length}):**\n`;
-                for (const tx of pending.slice(0, 5)) {
-                    const statusEmoji = this.bot.getStatusEmoji(tx.status);
-                    // FIX: Escape gli underscore nel testo dello stato
-                    const statusText = this.bot.getStatusText(tx.status).replace(/_/g, '\\_');
-                    // FIX: Escape underscore nell'ID
-                    const displayId = tx.transactionId.length > 15 ? 
-                        tx.transactionId.substring(2, 12).replace(/_/g, '\\_') + '...' : 
-                        tx.transactionId.replace(/_/g, '\\_');
-                    message += `${statusEmoji} ${displayId}\n`;
-                    message += `📊 ${statusText}\n`;
-                    message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
-                }
+                message += MarkdownEscape.formatTransactionList(
+                    pending.slice(0, 5),
+                    this.bot.getStatusEmoji.bind(this.bot),
+                    this.bot.getStatusText.bind(this.bot)
+                );
             }
             
             message += `✅ **Completate:** ${completed.length}`;
@@ -104,9 +98,7 @@ class CallbackHandler {
 
             let message = '📊 **I TUOI ANNUNCI ATTIVI:**\n\n';
             for (const ann of announcements) {
-                // FIX: Escape underscore nell'ID annuncio
-                message += `🆔 ${ann.announcementId.replace(/_/g, '\\_')}\n`;
-                message += `💰 ${ann.price || ann.basePrice}€/KWH\n`;
+                message += MarkdownEscape.formatAnnouncement(ann);
                 message += `📅 Pubblicato: ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
             }
             
@@ -130,11 +122,10 @@ class CallbackHandler {
             if (completed.length > 0) {
                 message += `✅ **COMPLETATE (${completed.length}):**\n`;
                 completed.slice(-10).reverse().forEach(tx => {
-                    // FIX: Escape underscore nell'ID
                     const displayId = tx.transactionId.length > 20 ? 
-                        tx.transactionId.substring(2, 17).replace(/_/g, '\\_') + '...' : 
-                        tx.transactionId.replace(/_/g, '\\_');
-                    message += `• ${displayId}\n`;
+                        tx.transactionId.substring(2, 17) + '...' : 
+                        tx.transactionId;
+                    message += `• \`${displayId}\`\n`;
                     message += `  📅 ${tx.completedAt ? tx.completedAt.toLocaleDateString('it-IT') : tx.createdAt.toLocaleDateString('it-IT')}\n`;
                 });
                 message += '\n';
@@ -143,11 +134,10 @@ class CallbackHandler {
             if (cancelled.length > 0) {
                 message += `❌ **ANNULLATE (${cancelled.length}):**\n`;
                 cancelled.slice(-5).reverse().forEach(tx => {
-                    // FIX: Escape underscore nell'ID
                     const displayId = tx.transactionId.length > 20 ? 
-                        tx.transactionId.substring(2, 17).replace(/_/g, '\\_') + '...' : 
-                        tx.transactionId.replace(/_/g, '\\_');
-                    message += `• ${displayId}\n`;
+                        tx.transactionId.substring(2, 17) + '...' : 
+                        tx.transactionId;
+                    message += `• \`${displayId}\`\n`;
                     message += `  📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n`;
                 });
             }
@@ -208,9 +198,8 @@ class CallbackHandler {
             
             let message = '⏳ **TRANSAZIONI IN SOSPESO:**\n\n';
             for (const tx of pendingTransactions.slice(0, 10)) {
-                // FIX: Escape underscore nell'ID
-                message += `🆔 ${tx.transactionId.replace(/_/g, '\\_')}\n`;
-                message += `📊 Status: ${tx.status}\n`;
+                message += `🆔 \`${tx.transactionId}\`\n`;
+                message += `📊 Status: ${MarkdownEscape.escape(tx.status)}\n`;
                 message += `📅 ${tx.createdAt.toLocaleDateString('it-IT')}\n\n`;
             }
             
@@ -242,8 +231,7 @@ class CallbackHandler {
             
             let message = '⚠️ **DISPUTE APERTE:**\n\n';
             for (const dispute of disputes.slice(0, 5)) {
-                // FIX: Escape underscore nell'ID
-                message += `🆔 ${dispute.transactionId.replace(/_/g, '\\_')}\n`;
+                message += `🆔 \`${dispute.transactionId}\`\n`;
                 message += `⚠️ Issues: ${dispute.issues?.length || 0}\n`;
                 message += `📅 ${dispute.createdAt.toLocaleDateString('it-IT')}\n\n`;
             }
@@ -272,7 +260,7 @@ class CallbackHandler {
             if (topUsers.length > 0) {
                 message += `🏆 **Top 5 venditori:**\n`;
                 topUsers.forEach((user, index) => {
-                    message += `${index + 1}. @${user.username || 'utente'} (${user.positivePercentage}%)\n`;
+                    message += `${index + 1}. @${MarkdownEscape.escape(user.username || 'utente')} (${user.positivePercentage}%)\n`;
                 });
             }
             
@@ -299,7 +287,7 @@ class CallbackHandler {
             
             let message = '📋 **ANNUNCI ATTIVI:**\n\n';
             for (const ann of activeAnnouncements.slice(0, 10)) {
-                message += `💰 ${ann.price || ann.basePrice}€/KWH - ${ann.zones}\n`;
+                message += `💰 ${ann.price || ann.basePrice}€/KWH - ${MarkdownEscape.escape(ann.zones)}\n`;
                 message += `📅 ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
             }
             
@@ -337,12 +325,12 @@ class CallbackHandler {
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                     `✅ **RICHIESTA ACCETTATA!**\n\n` +
-                    `Il venditore ha confermato la tua richiesta per ${transaction.scheduledDate}.\n\n` +
+                    `Il venditore ha confermato la tua richiesta per ${MarkdownEscape.escape(transaction.scheduledDate)}.\n\n` +
                     `📍 **Posizione:** \`${transaction.location}\`\n` +
-                    `🏢 **Brand:** ${transaction.brand}\n` +
-                    `🔌 **Connettore:** ${transaction.connector}\n\n` +
+                    `🏢 **Brand:** ${MarkdownEscape.escape(transaction.brand)}\n` +
+                    `🔌 **Connettore:** ${MarkdownEscape.escape(transaction.connector)}\n\n` +
                     `⚠️ **IMPORTANTE:** Quando arrivi alla colonnina e sei pronto per ricaricare, premi il bottone sotto per avvisare il venditore.\n\n` +
-                    `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
+                    `🔍 ID Transazione: \`${transactionId}\``,
                     { 
                         parse_mode: 'Markdown',
                         reply_markup: {
@@ -371,9 +359,9 @@ class CallbackHandler {
                         await this.bot.chatCleaner.sendPersistentMessage(
                             { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                             `⏰ **PROMEMORIA**\n\n` +
-                            `La tua ricarica è prevista per ${transaction.scheduledDate}.\n\n` +
+                            `La tua ricarica è prevista per ${MarkdownEscape.escape(transaction.scheduledDate)}.\n\n` +
                             `Quando arrivi alla colonnina, ricordati di premere il bottone per avvisare il venditore!\n\n` +
-                            `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
+                            `🔍 ID Transazione: \`${transactionId}\``,
                             { 
                                 parse_mode: 'Markdown',
                                 reply_markup: {
@@ -423,7 +411,7 @@ class CallbackHandler {
                 `• Verifica che il connettore sia quello giusto\n` +
                 `• Assicurati che l'auto sia pronta per ricevere la ricarica\n` +
                 `• Tieni il cavo a portata di mano\n\n` +
-                `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
+                `🔍 ID Transazione: \`${transactionId}\``,
                 { parse_mode: 'Markdown' }
             );
             
@@ -432,11 +420,11 @@ class CallbackHandler {
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.sellerId } },
                     `⏰ **L'ACQUIRENTE È ARRIVATO!**\n\n` +
-                    `L'acquirente @${ctx.from.username || ctx.from.first_name} è arrivato alla colonnina ed è pronto per ricaricare.\n\n` +
+                    `L'acquirente @${MarkdownEscape.escape(ctx.from.username || ctx.from.first_name)} è arrivato alla colonnina ed è pronto per ricaricare.\n\n` +
                     `📍 **Posizione:** \`${transaction.location}\`\n` +
-                    `🏢 **Colonnina:** ${transaction.brand}\n` +
-                    `🔌 **Connettore:** ${transaction.connector}\n` +
-                    `🔍 **ID Transazione:** \`${transactionId.replace(/_/g, '\\_')}\`\n\n` +
+                    `🏢 **Colonnina:** ${MarkdownEscape.escape(transaction.brand)}\n` +
+                    `🔌 **Connettore:** ${MarkdownEscape.escape(transaction.connector)}\n` +
+                    `🔍 **ID Transazione:** \`${transactionId}\`\n\n` +
                     `È il momento di attivare la ricarica!`,
                     {
                         parse_mode: 'Markdown',
@@ -484,7 +472,7 @@ class CallbackHandler {
             if (buyerUsername !== 'user') {
                 await this.bot.chatCleaner.sendTemporaryMessage(ctx,
                     message +
-                    `Puoi contattare direttamente @${buyerUsername} cliccando qui:\n` +
+                    `Puoi contattare direttamente @${MarkdownEscape.escape(buyerUsername)} cliccando qui:\n` +
                     `${telegramLink}\n\n` +
                     `📝 **Suggerimenti per la conversazione:**\n` +
                     `• Conferma i dettagli della ricarica\n` +
@@ -530,7 +518,17 @@ class CallbackHandler {
             
             const transaction = pending[index];
             const announcement = await this.bot.announcementService.getAnnouncement(transaction.announcementId);
-            const detailText = this.bot.formatTransactionDetails(transaction, announcement, userId);
+            
+            const statusText = this.bot.getStatusText(transaction.status);
+            const statusEmoji = this.bot.getStatusEmoji(transaction.status);
+            const role = userId === transaction.sellerId ? 'VENDITORE' : 'ACQUIRENTE';
+            
+            let detailText = MarkdownEscape.formatTransactionDetails(transaction, role, statusText, statusEmoji);
+            
+            // Aggiungi informazioni aggiuntive se presenti
+            if (announcement) {
+                detailText += `💰 Prezzo: ${announcement.price || announcement.basePrice}€/KWH\n`;
+            }
             
             const shortId = transaction.transactionId.slice(-10);
             this.bot.cacheTransactionId(shortId, transaction.transactionId);
@@ -587,10 +585,10 @@ class CallbackHandler {
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.sellerId } },
                     `💳 **PAGAMENTO DICHIARATO**\n\n` +
-                    `L'acquirente @${ctx.from.username || ctx.from.first_name} dichiara di aver pagato.\n\n` +
+                    `L'acquirente @${MarkdownEscape.escape(ctx.from.username || ctx.from.first_name)} dichiara di aver pagato.\n\n` +
                     `💰 Importo dichiarato: €${amount}\n` +
                     `⚡ KWH forniti: ${transaction.declaredKwh || 'N/A'}\n` +
-                    `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\`\n\n` +
+                    `🔍 ID Transazione: \`${transactionId}\`\n\n` +
                     `Hai ricevuto il pagamento?`,
                     {
                         parse_mode: 'Markdown',
@@ -649,7 +647,7 @@ class CallbackHandler {
                             parse_mode: 'Markdown',
                             reply_markup: {
                                 inline_keyboard: paymentPending.map((tx, index) => [{
-                                    text: `💰 ${tx.transactionId.slice(-10).replace(/_/g, '\\_')} - ${tx.declaredKwh || '?'} KWH`,
+                                    text: `💰 \`${tx.transactionId.slice(-10)}\` - ${tx.declaredKwh || '?'} KWH`,
                                     callback_data: `confirm_payment_${tx.transactionId}`
                                 }])
                             }
@@ -762,7 +760,7 @@ class CallbackHandler {
                     `Il venditore ha confermato la ricezione del pagamento.\n\n` +
                     `⭐ **Lascia un feedback**\n` +
                     `La tua valutazione aiuta la community a crescere.\n\n` +
-                    `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
+                    `🔍 ID Transazione: \`${transactionId}\``,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: {
@@ -784,7 +782,7 @@ class CallbackHandler {
                     `Hai confermato la ricezione del pagamento.\n\n` +
                     `⭐ **Lascia un feedback**\n` +
                     `Valuta l'acquirente per aiutare la community.\n\n` +
-                    `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
+                    `🔍 ID Transazione: \`${transactionId}\``,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: {
@@ -913,10 +911,10 @@ class CallbackHandler {
             
             await ctx.editMessageText(
                 `💳 **PROCEDI CON IL PAGAMENTO**\n\n` +
-                `🆔 Transazione: \`${transactionId.replace(/_/g, '\\_')}\`\n` +
+                `🆔 Transazione: \`${transactionId}\`\n` +
                 `⚡ KWH confermati: ${transaction.declaredKwh || 'N/A'}\n` +
                 `💰 Importo: €${amount}\n` +
-                `💳 Metodi accettati: ${announcement?.paymentMethods || 'Come concordato'}\n\n` +
+                `💳 Metodi accettati: ${MarkdownEscape.escape(announcement?.paymentMethods || 'Come concordato')}\n\n` +
                 `Effettua il pagamento secondo i metodi concordati, poi conferma.`,
                 {
                     parse_mode: 'Markdown',
@@ -968,7 +966,7 @@ class CallbackHandler {
                     `Il venditore ha confermato la ricezione del pagamento.\n\n` +
                     `⭐ **Lascia un feedback**\n` +
                     `La tua valutazione aiuta la community a crescere.\n\n` +
-                    `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
+                    `🔍 ID Transazione: \`${transactionId}\``,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: {
@@ -990,7 +988,7 @@ class CallbackHandler {
                     `Hai confermato la ricezione del pagamento.\n\n` +
                     `⭐ **Lascia un feedback**\n` +
                     `Valuta l'acquirente per aiutare la community.\n\n` +
-                    `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
+                    `🔍 ID Transazione: \`${transactionId}\``,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: {
@@ -1069,10 +1067,8 @@ class CallbackHandler {
                 userStats
             );
             
-            const escapedText = detailText.replace(/_/g, '\\_');
-            
             await this.bot.chatCleaner.editOrReplace(ctx,
-                `📋 **DETTAGLI ANNUNCIO**\n\n${escapedText}`,
+                `📋 **DETTAGLI ANNUNCIO**\n\n${detailText}`,
                 {
                     parse_mode: 'Markdown',
                     reply_markup: Keyboards.getAnnouncementActionsKeyboard(announcement.announcementId).reply_markup,
@@ -1147,10 +1143,8 @@ class CallbackHandler {
                 userStats
             );
             
-            const escapedText = detailText.replace(/_/g, '\\_');
-            
             await ctx.editMessageText(
-                `📋 **DETTAGLI ANNUNCIO**\n\n${escapedText}`,
+                `📋 **DETTAGLI ANNUNCIO**\n\n${detailText}`,
                 {
                     parse_mode: 'Markdown',
                     reply_markup: Keyboards.getAnnouncementActionsKeyboard(announcement.announcementId).reply_markup
@@ -1172,8 +1166,7 @@ class CallbackHandler {
             const annTransactions = transactions.filter(t => t.announcementId === announcement.announcementId);
             
             let statsText = `📊 **STATISTICHE ANNUNCIO**\n\n`;
-            // FIX: Escape underscore nell'ID
-            statsText += `🆔 ID: ${announcement.announcementId.replace(/_/g, '\\_')}\n\n`;
+            statsText += `🆔 ID: \`${announcement.announcementId}\`\n\n`;
             statsText += `📈 **Transazioni:**\n`;
             statsText += `• Totali: ${annTransactions.length}\n`;
             statsText += `• Completate: ${annTransactions.filter(t => t.status === 'completed').length}\n`;
@@ -1232,7 +1225,7 @@ class CallbackHandler {
                     `• Verifica che il cavo sia inserito bene\n` +
                     `• Controlla che l'auto sia pronta\n` +
                     `• Riprova l'attivazione\n\n` +
-                    `ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
+                    `ID Transazione: \`${transactionId}\``,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: Keyboards.getBuyerChargingConfirmKeyboard().reply_markup
@@ -1259,7 +1252,7 @@ class CallbackHandler {
                 try {
                     let message = '⏰ Promemoria: È il momento di attivare la ricarica!';
                     if (transactionId) {
-                        message += `\n\nID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``;
+                        message += `\n\nID Transazione: \`${transactionId}\``;
                     }
                     
                     await this.bot.chatCleaner.sendPersistentMessage(
@@ -1311,10 +1304,10 @@ class CallbackHandler {
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.sellerId } },
                     `✅ **RICARICA CONFERMATA!**\n\n` +
-                    `L'acquirente @${ctx.from.username || ctx.from.first_name} ha confermato che la ricarica è in corso.\n\n` +
+                    `L'acquirente @${MarkdownEscape.escape(ctx.from.username || ctx.from.first_name)} ha confermato che la ricarica è in corso.\n\n` +
                     `⚡ La ricarica sta procedendo correttamente.\n` +
                     `⏳ Attendi che l'acquirente completi la ricarica e invii la foto del display.\n\n` +
-                    `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
+                    `🔍 ID Transazione: \`${transactionId}\``,
                     {
                         parse_mode: 'Markdown'
                     }
@@ -1372,7 +1365,7 @@ class CallbackHandler {
             try {
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.sellerId } },
-                    Messages.CHARGING_FAILED_RETRY + `\n\nID Transazione: \`${transactionId.replace(/_/g, '\\_')}\``,
+                    Messages.CHARGING_FAILED_RETRY + `\n\nID Transazione: \`${transactionId}\``,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: Keyboards.getRetryActivationKeyboard(retryCount).reply_markup
@@ -1416,9 +1409,9 @@ class CallbackHandler {
                     `Il venditore ha confermato la ricezione di ${transaction.declaredKwh || 'N/A'} KWH.\n\n` +
                     `💳 *Procedi con il pagamento*\n` +
                     `💰 Importo: €${amount}\n` +
-                    `💳 Metodi accettati: ${announcement?.paymentMethods || 'Come concordato'}\n\n` +
+                    `💳 Metodi accettati: ${MarkdownEscape.escape(announcement?.paymentMethods || 'Come concordato')}\n\n` +
                     `Una volta effettuato il pagamento, premi il pulsante qui sotto.\n\n` +
-                    `🔍 ID Transazione: \`${transaction.transactionId.replace(/_/g, '\\_')}\``,
+                    `🔍 ID Transazione: \`${transaction.transactionId}\``,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: Keyboards.getPaymentConfirmationKeyboard().reply_markup
@@ -1632,7 +1625,7 @@ class CallbackHandler {
             await ctx.editMessageText(
                 `📞 **CONTATTA ADMIN**\n\n` +
                 `Per supporto diretto contatta:\n` +
-                `👤 @${process.env.ADMIN_USERNAME || 'amministratore'}\n\n` +
+                `👤 @${MarkdownEscape.escape(process.env.ADMIN_USERNAME || 'amministratore')}\n\n` +
                 `🚨 **Per emergenze:**\n` +
                 `Usa il pulsante "Chiama admin" durante le transazioni.`,
                 {
@@ -1774,7 +1767,7 @@ class CallbackHandler {
         const transaction = await this.bot.transactionService.getTransaction(transactionId);
         
         if (!transaction) {
-            await ctx.editMessageText('❌ Transazione non trovata con ID: ' + transactionId.replace(/_/g, '\\_'));
+            await ctx.editMessageText(`❌ Transazione non trovata con ID: \`${transactionId}\``);
             return;
         }
         
@@ -1792,10 +1785,10 @@ class CallbackHandler {
             await this.bot.chatCleaner.sendPersistentMessage(
                 { telegram: ctx.telegram, from: { id: transaction.sellerId } },
                 `💳 **DICHIARAZIONE PAGAMENTO**\n\n` +
-                `L'acquirente @${ctx.from.username || ctx.from.first_name} dichiara di aver pagato.\n\n` +
+                `L'acquirente @${MarkdownEscape.escape(ctx.from.username || ctx.from.first_name)} dichiara di aver pagato.\n\n` +
                 `💰 Importo dichiarato: €${amount}\n` +
                 `⚡ KWH forniti: ${transaction.declaredKwh || 'N/A'}\n` +
-                `🔍 ID Transazione: \`${transactionId.replace(/_/g, '\\_')}\`\n\n` +
+                `🔍 ID Transazione: \`${transactionId}\`\n\n` +
                 `Hai ricevuto il pagamento?`,
                 {
                     parse_mode: 'Markdown',
@@ -1812,7 +1805,7 @@ class CallbackHandler {
         // Messaggio di conferma che si auto-elimina
         await ctx.editMessageText(
             `✅ **DICHIARAZIONE PAGAMENTO INVIATA!**\n\n` +
-            `🆔 Transazione: \`${transactionId.replace(/_/g, '\\_')}\`\n` +
+            `🆔 Transazione: \`${transactionId}\`\n` +
             `💰 Importo: €${amount}\n\n` +
             `Il venditore riceverà una notifica e dovrà confermare la ricezione del pagamento.\n\n` +
             `Riceverai aggiornamenti sullo stato della transazione.`,
