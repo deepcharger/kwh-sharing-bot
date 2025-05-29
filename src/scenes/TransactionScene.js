@@ -703,12 +703,25 @@ function createTransactionScene(bot) {
                 return;
             }
 
-            const { transaction } = ctx.session.transactionData;
+            const { transaction, announcement } = ctx.session.transactionData;
+            
+            // IMPORTANTE: Applica il minimo garantito se presente
+            let finalKwh = kwhAmount;
+            let appliedMinimum = false;
+            
+            if (announcement && announcement.minimumKwh && kwhAmount < announcement.minimumKwh) {
+                finalKwh = announcement.minimumKwh;
+                appliedMinimum = true;
+            }
             
             await bot.transactionService.updateTransactionStatus(
                 transaction.transactionId,
                 'kwh_declared',
-                { declaredKwh: kwhAmount, actualKwh: kwhAmount }
+                { 
+                    declaredKwh: finalKwh,  // Usa i KWH con minimo applicato
+                    actualKwh: kwhAmount,   // Salva anche i KWH reali
+                    appliedMinimum: appliedMinimum
+                }
             );
 
             try {
@@ -717,10 +730,14 @@ function createTransactionScene(bot) {
                 const shortId = TransactionCache.generateShortId(transaction.transactionId);
                 bot.transactionCache.set(shortId, transaction.transactionId);
 
+                let kwhMessage = appliedMinimum ? 
+                    `L'acquirente dichiara ${kwhAmount} KWH.\n⚠️ **Applicato minimo garantito: ${finalKwh} KWH**` :
+                    `L'acquirente dichiara ${finalKwh} KWH.`;
+
                 await ctx.telegram.sendMessage(
                     transaction.sellerId,
                     `📸 **RICARICA COMPLETATA**\n\n` +
-                    `L'acquirente dichiara ${kwhAmount} KWH.\n` +
+                    `${kwhMessage}\n` +
                     `Verifica la foto e conferma.\n\n` +
                     `ID: \`${transaction.transactionId}\``,
                     {
@@ -744,7 +761,11 @@ function createTransactionScene(bot) {
                 console.error('Error notifying seller:', error);
             }
 
-            await ctx.reply('✅ Dati inviati al venditore per verifica.');
+            await ctx.reply('✅ Dati inviati al venditore per verifica.\n\n' +
+                (appliedMinimum ? 
+                    `⚠️ **Nota:** Hai ricaricato ${kwhAmount} KWH ma pagherai per il minimo garantito di ${finalKwh} KWH come da condizioni dell'annuncio.` : 
+                    '')
+            );
             return ctx.scene.leave();
         }
 
