@@ -430,9 +430,9 @@ class CallbackHandler {
                         parse_mode: 'Markdown',
                         reply_markup: {
                             inline_keyboard: [
-                                [{ text: '⚡ Attiva ricarica ORA', callback_data: 'activate_charging' }],
-                                [{ text: '⏸️ Ritarda di 5 min', callback_data: 'delay_charging' }],
-                                [{ text: '❌ Problemi tecnici', callback_data: 'technical_issues' }]
+                                [{ text: '⚡ Attiva ricarica ORA', callback_data: `activate_charging_${transactionId}` }],
+                                [{ text: '⏸️ Ritarda di 5 min', callback_data: `delay_charging_${transactionId}` }],
+                                [{ text: '❌ Problemi tecnici', callback_data: `technical_issues_${transactionId}` }]
                             ]
                         }
                     }
@@ -1191,6 +1191,303 @@ class CallbackHandler {
     }
 
     setupChargingCallbacks() {
+        // Gestione attivazione ricarica dal venditore
+        this.bot.bot.action(/^activate_charging_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const transactionId = ctx.match[1];
+            const transaction = await this.bot.transactionService.getTransaction(transactionId);
+            
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            // Verifica che sia il venditore
+            if (ctx.from.id !== transaction.sellerId) {
+                await ctx.answerCbQuery('❌ Non sei autorizzato.', { show_alert: true });
+                return;
+            }
+            
+            // Aggiorna lo stato
+            await this.bot.transactionService.updateTransactionStatus(
+                transactionId,
+                'charging_started'
+            );
+            
+            // Notifica l'acquirente
+            try {
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.buyerId } },
+                    `⚡ **RICARICA ATTIVATA!**\n\n` +
+                    `Il venditore ha attivato la ricarica.\n` +
+                    `Controlla il connettore e conferma se la ricarica è iniziata.\n\n` +
+                    `💡 **Se non sta caricando:**\n` +
+                    `• Verifica che il cavo sia inserito bene\n` +
+                    `• Controlla che l'auto sia pronta\n` +
+                    `• Riprova l'attivazione\n\n` +
+                    `ID Transazione: \`${transactionId}\``,
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '✅ Confermo, sta caricando', callback_data: `charging_ok_${transactionId}` },
+                                    { text: '❌ Non sta caricando', callback_data: `charging_fail_${transactionId}` }
+                                ]
+                            ]
+                        }
+                    }
+                );
+            } catch (error) {
+                console.error('Error notifying buyer:', error);
+            }
+            
+            await ctx.editMessageText(
+                '⚡ **Ricarica attivata!**\n\n' +
+                'Attendi la conferma dell\'acquirente che la ricarica sia iniziata correttamente.',
+                { parse_mode: 'Markdown' }
+            );
+        });
+
+        // Gestione ritardo attivazione
+        this.bot.bot.action(/^delay_charging_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const transactionId = ctx.match[1];
+            
+            setTimeout(async () => {
+                try {
+                    await this.bot.chatCleaner.sendPersistentMessage(
+                        { telegram: ctx.telegram, from: { id: ctx.from.id } },
+                        `⏰ **PROMEMORIA**\n\nÈ il momento di attivare la ricarica!\n\nID Transazione: \`${transactionId}\``,
+                        {
+                            parse_mode: 'Markdown',
+                            reply_markup: {
+                                inline_keyboard: [
+                                    [{ text: '⚡ Attiva ricarica ORA', callback_data: `activate_charging_${transactionId}` }]
+                                ]
+                            }
+                        }
+                    );
+                } catch (error) {
+                    console.error('Error sending delayed reminder:', error);
+                }
+            }, 5 * 60 * 1000); // 5 minuti
+            
+            await ctx.editMessageText(
+                '⏸️ **Ricarica rimandata di 5 minuti.**\n\n' +
+                'Riceverai un promemoria quando sarà il momento di attivare.',
+                { parse_mode: 'Markdown' }
+            );
+        });
+
+        // Gestione problemi tecnici
+        this.bot.bot.action(/^technical_issues_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const transactionId = ctx.match[1];
+            const transaction = await this.bot.transactionService.getTransaction(transactionId);
+            
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            await this.bot.transactionService.addTransactionIssue(
+                transactionId,
+                'Problemi tecnici segnalati dal venditore',
+                ctx.from.id
+            );
+            
+            try {
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.buyerId } },
+                    `⚠️ **PROBLEMI TECNICI**\n\n` +
+                    `Il venditore segnala problemi tecnici con l'attivazione della ricarica.\n\n` +
+                    `Attendere ulteriori comunicazioni o contattare direttamente il venditore.`,
+                    { parse_mode: 'Markdown' }
+                );
+            } catch (error) {
+                console.error('Error notifying buyer:', error);
+            }
+            
+            await ctx.editMessageText(
+                '⚠️ Problema tecnico segnalato all\'acquirente.',
+                { parse_mode: 'Markdown' }
+            );
+        });
+
+        // CALLBACK MANCANTI - Conferma ricarica dall'acquirente
+        this.bot.bot.action(/^charging_ok_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const transactionId = ctx.match[1];
+            
+            const transaction = await this.bot.transactionService.getTransaction(transactionId);
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            // Verifica che sia l'acquirente
+            if (ctx.from.id !== transaction.buyerId) {
+                await ctx.answerCbQuery('❌ Non sei autorizzato.', { show_alert: true });
+                return;
+            }
+            
+            // Aggiorna lo stato
+            await this.bot.transactionService.updateTransactionStatus(
+                transactionId,
+                'charging_in_progress'
+            );
+            
+            // Notifica il venditore
+            try {
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.sellerId } },
+                    `✅ **RICARICA CONFERMATA!**\n\n` +
+                    `L'acquirente @${MarkdownEscape.escape(ctx.from.username || ctx.from.first_name)} ha confermato che la ricarica è in corso.\n\n` +
+                    `⚡ La ricarica sta procedendo correttamente.\n` +
+                    `⏳ Attendi che l'acquirente completi la ricarica e invii la foto del display.\n\n` +
+                    `🔍 ID Transazione: \`${transactionId}\``,
+                    {
+                        parse_mode: 'Markdown'
+                    }
+                );
+            } catch (error) {
+                console.error('Error notifying seller about charging confirmation:', error);
+            }
+            
+            // Aggiorna il messaggio dell'acquirente
+            await ctx.editMessageText(
+                '✅ **RICARICA IN CORSO!**\n\n' +
+                'Perfetto! La ricarica sta procedendo.\n\n' +
+                'Quando hai terminato, usa il bot per inviare la foto del display con i KWH erogati.\n\n' +
+                '💡 **Prossimi passi:**\n' +
+                '1. Completa la ricarica\n' +
+                '2. Scatta foto del display\n' +
+                '3. Invia tramite "Gestisci transazione"',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '📋 Vai alla transazione', callback_data: `open_tx_${transactionId}` }]
+                        ]
+                    }
+                }
+            );
+        });
+
+        this.bot.bot.action(/^charging_fail_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const transactionId = ctx.match[1];
+            
+            const transaction = await this.bot.transactionService.getTransaction(transactionId);
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            // Verifica che sia l'acquirente
+            if (ctx.from.id !== transaction.buyerId) {
+                await ctx.answerCbQuery('❌ Non sei autorizzato.', { show_alert: true });
+                return;
+            }
+            
+            const retryCount = await this.bot.transactionService.incrementRetryCount(transactionId);
+            
+            // Notifica il venditore
+            try {
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.sellerId } },
+                    `❌ **PROBLEMA RICARICA**\n\n` +
+                    `L'acquirente segnala che la ricarica non è partita.\n\n` +
+                    `🔌 Connettore: ${MarkdownEscape.escape(transaction.connector)}\n` +
+                    `📍 Colonnina: ${MarkdownEscape.escape(transaction.brand)}\n` +
+                    `🔍 ID Transazione: \`${transactionId}\`\n\n` +
+                    `Riprova l'attivazione o verifica il problema.`,
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: Keyboards.getRetryActivationKeyboard(retryCount).reply_markup
+                    }
+                );
+            } catch (error) {
+                console.error('Error notifying seller about charging failure:', error);
+            }
+            
+            await ctx.editMessageText(
+                '❌ **SEGNALAZIONE INVIATA**\n\n' +
+                'Il venditore è stato avvisato del problema e riproverà l\'attivazione.\n\n' +
+                'Attendi ulteriori istruzioni.',
+                { parse_mode: 'Markdown' }
+            );
+        });
+
+        // Aggiungi callback per aprire la transazione
+        this.bot.bot.action(/^open_tx_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const transactionId = ctx.match[1];
+            
+            ctx.session.transactionId = transactionId;
+            await this.bot.chatCleaner.enterScene(ctx, 'transactionScene');
+        });
+
+        // Callback per gestire i retry del venditore
+        this.bot.bot.action('retry_activation', async (ctx) => {
+            await ctx.answerCbQuery();
+            
+            const messageText = ctx.callbackQuery.message.text;
+            const transactionIdMatch = messageText.match(/ID Transazione: `?([^`\s]+)`?/);
+            
+            if (!transactionIdMatch) {
+                await ctx.editMessageText('❌ ID transazione non trovato.');
+                return;
+            }
+            
+            const transactionId = transactionIdMatch[1];
+            const transaction = await this.bot.transactionService.getTransaction(transactionId);
+            
+            if (!transaction) {
+                await ctx.editMessageText('❌ Transazione non trovata.');
+                return;
+            }
+            
+            // Riprova l'attivazione
+            await this.bot.transactionService.updateTransactionStatus(
+                transactionId,
+                'charging_started'
+            );
+            
+            try {
+                await this.bot.chatCleaner.sendPersistentMessage(
+                    { telegram: ctx.telegram, from: { id: transaction.buyerId } },
+                    `⚡ **NUOVO TENTATIVO DI ATTIVAZIONE**\n\n` +
+                    `Il venditore sta riprovando ad attivare la ricarica.\n` +
+                    `Controlla se ora funziona.\n\n` +
+                    `ID: \`${transactionId}\``,
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '✅ Ora funziona!', callback_data: `charging_ok_${transactionId}` },
+                                    { text: '❌ Ancora non carica', callback_data: `charging_fail_${transactionId}` }
+                                ]
+                            ]
+                        }
+                    }
+                );
+            } catch (error) {
+                console.error('Error notifying buyer about retry:', error);
+            }
+            
+            await ctx.editMessageText(
+                '🔄 **RIATTIVAZIONE IN CORSO**\n\n' +
+                'Nuovo tentativo inviato. L\'acquirente verificherà se ora funziona.',
+                { parse_mode: 'Markdown' }
+            );
+        });
+
         this.bot.bot.action('activate_charging', async (ctx) => {
             await ctx.answerCbQuery();
             
