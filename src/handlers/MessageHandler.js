@@ -1,5 +1,6 @@
 const Messages = require('../utils/Messages');
 const Keyboards = require('../utils/Keyboards');
+const MarkdownEscape = require('../utils/MarkdownEscape');
 
 class MessageHandler {
     constructor(bot) {
@@ -36,7 +37,7 @@ class MessageHandler {
                         { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                         `❌ *Richiesta rifiutata*\n\n` +
                         `Il venditore ha rifiutato la tua richiesta.\n` +
-                        `Motivo: ${reason}\n\n` +
+                        `Motivo: ${MarkdownEscape.escape(reason)}\n\n` +
                         `Puoi provare con un altro venditore.`,
                         { parse_mode: 'Markdown' }
                     );
@@ -110,7 +111,7 @@ class MessageHandler {
                     await this.bot.chatCleaner.sendPersistentMessage(
                         { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                         `⚠️ *Problema con i KWH dichiarati*\n\n` +
-                        `Il venditore segnala: ${reason}\n\n` +
+                        `Il venditore segnala: ${MarkdownEscape.escape(reason)}\n\n` +
                         `Controlla nuovamente la foto e rispondi al venditore.`,
                         { parse_mode: 'Markdown' }
                     );
@@ -176,7 +177,7 @@ class MessageHandler {
                 
                 try {
                     await ctx.telegram.sendPhoto(transaction.sellerId, photo.file_id, {
-                        caption: `📷 Prova di pagamento dall'acquirente @${ctx.from.username || ctx.from.first_name}\n\nTransazione: ${transactionId}`
+                        caption: `📷 Prova di pagamento dall'acquirente @${MarkdownEscape.escape(ctx.from.username || ctx.from.first_name)}\n\nTransazione: \`${transactionId}\``
                     });
                     
                     await this.bot.chatCleaner.sendConfirmationMessage(ctx,
@@ -257,9 +258,6 @@ class MessageHandler {
             );
         });
 
-        // RIMOSSO: ❌ Callback duplicati select_payment_ e payment_in_progress
-        // Questi sono già gestiti in CallbackHandler.js
-        
         // Handle unexpected messages
         this.bot.bot.on('message', async (ctx) => {
             // Solo se non siamo in una scene
