@@ -1,6 +1,7 @@
 const { Scenes } = require('telegraf');
 const Messages = require('../utils/Messages');
 const Keyboards = require('../utils/Keyboards');
+const MarkdownEscape = require('../utils/MarkdownEscape');
 
 function createContactSellerScene(bot) {
     const scene = new Scenes.BaseScene('contactSellerScene');
@@ -38,7 +39,7 @@ function createContactSellerScene(bot) {
         let message = `🛒 **RIEPILOGO ANNUNCIO**\n\n`;
         
         // Info venditore con badge
-        message += `👤 **Venditore:** @${seller?.username || 'utente'}`;
+        message += `👤 **Venditore:** @${MarkdownEscape.escape(seller?.username || 'utente')}`;
         if (userStats && userStats.totalFeedback >= 5) {
             if (userStats.positivePercentage >= 95) {
                 message += ` 🌟 TOP`;
@@ -48,8 +49,8 @@ function createContactSellerScene(bot) {
         }
         message += '\n';
         
-        // Dettagli annuncio - FIX: Escape underscore nell'ID
-        message += `🆔 **ID:** \`${announcement.announcementId.replace(/_/g, '\\_')}\`\n`;
+        // Dettagli annuncio
+        message += `🆔 **ID:** \`${announcement.announcementId}\`\n`;
         
         // Pricing
         if (announcement.pricingType === 'fixed') {
@@ -77,23 +78,23 @@ function createContactSellerScene(bot) {
         message += '\n';
         
         if (announcement.currentType) {
-            message += `⚡ **Corrente:** ${announcement.currentType}\n`;
+            message += `⚡ **Corrente:** ${MarkdownEscape.escape(announcement.currentType)}\n`;
         }
         
         if (announcement.networks) {
-            message += `🌐 **Reti attivabili:** ${announcement.networks}\n`;
+            message += `🌐 **Reti attivabili:** ${MarkdownEscape.escape(announcement.networks)}\n`;
         }
         
         if (announcement.availability) {
-            message += `⏰ **Disponibilità:** ${announcement.availability}\n`;
+            message += `⏰ **Disponibilità:** ${MarkdownEscape.escape(announcement.availability)}\n`;
         }
         
         if (announcement.paymentMethods) {
-            message += `💳 **Pagamenti:** ${announcement.paymentMethods}\n`;
+            message += `💳 **Pagamenti:** ${MarkdownEscape.escape(announcement.paymentMethods)}\n`;
         }
         
         if (announcement.description) {
-            message += `📋 **Condizioni:** ${announcement.description}\n`;
+            message += `📋 **Condizioni:** ${MarkdownEscape.escape(announcement.description)}\n`;
         }
         
         // Esempi di costo
@@ -204,7 +205,6 @@ function createContactSellerScene(bot) {
 
             case 'connector':
                 data.connector = text;
-                // FIX: Chiama la funzione createTransaction direttamente, non come metodo
                 await createTransaction(ctx, bot);
                 break;
         }
@@ -246,7 +246,7 @@ function createContactSellerScene(bot) {
         await ctx.reply('✅ Posizione ricevuta!\n\n🔢 **NUMERO SERIALE COLONNINA?**', { parse_mode: 'Markdown' });
     });
 
-    // FIX: Definisci createTransaction come funzione normale, non come metodo della scene
+    // Definisci createTransaction come funzione normale, non come metodo della scene
     async function createTransaction(ctx, bot) {
         try {
             const data = ctx.session.contactData;
@@ -269,15 +269,16 @@ function createContactSellerScene(bot) {
                 const buyer = await bot.userService.getUser(ctx.from.id);
                 const announcement = await bot.announcementService.getAnnouncement(data.announcementId);
                 
-                let notifyText = `📥 **NUOVA RICHIESTA DI ACQUISTO**\n\n`;
-                notifyText += `👤 Da: @${buyer?.username || buyer?.firstName || 'utente'}\n`;
-                notifyText += `📅 Data/ora: ${data.scheduledDate}\n`;
-                notifyText += `🏢 Brand: ${data.brand}\n`;
-                notifyText += `⚡ Tipo: ${data.currentType}\n`;
-                notifyText += `📍 Posizione: \`${data.location}\`\n`;
-                notifyText += `🔌 Connettore: ${data.connector}\n\n`;
-                // FIX: Escape underscore nell'ID transazione
-                notifyText += `🔍 ID Transazione: \`${transaction.transactionId.replace(/_/g, '\\_')}\``;
+                let notifyText = MarkdownEscape.formatPurchaseRequest({
+                    username: buyer?.username,
+                    firstName: buyer?.firstName,
+                    scheduledDate: data.scheduledDate,
+                    brand: data.brand,
+                    currentType: data.currentType,
+                    location: data.location,
+                    connector: data.connector,
+                    transactionId: transaction.transactionId
+                });
 
                 await ctx.telegram.sendMessage(
                     data.sellerId,
@@ -306,7 +307,7 @@ function createContactSellerScene(bot) {
 
             await ctx.reply(
                 `✅ **RICHIESTA INVIATA!**\n\n` +
-                `🆔 ID Transazione: \`${transaction.transactionId.replace(/_/g, '\\_')}\`\n\n` +
+                `🆔 ID Transazione: \`${transaction.transactionId}\`\n\n` +
                 `Il venditore riceverà una notifica e dovrà confermare la tua richiesta.\n` +
                 `Ti aggiorneremo sullo stato della transazione.`,
                 {
