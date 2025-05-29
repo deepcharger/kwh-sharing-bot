@@ -109,7 +109,7 @@ class MarkdownEscape {
         message += `👤 Ruolo: **${role}**\n`;
         message += `${statusEmoji} Stato: **${this.escape(statusText || transaction.status)}**\n\n`;
         
-        // Campi con escape normale
+        // FIX: Applica escape a TUTTI i campi che potrebbero contenere caratteri speciali
         message += `📅 Data ricarica: ${this.escape(transaction.scheduledDate || '')}\n`;
         message += `🏢 Brand: ${this.escape(transaction.brand || '')}\n`;
         message += `📍 Posizione: ${this.escape(transaction.location || '')}\n`;
