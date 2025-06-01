@@ -99,7 +99,14 @@ class CallbackHandler {
             let message = '📊 **I TUOI ANNUNCI ATTIVI:**\n\n';
             for (const ann of announcements) {
                 message += MarkdownEscape.formatAnnouncement(ann);
-                message += `📅 Pubblicato: ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
+                message += `📅 Pubblicato: ${ann.createdAt.toLocaleDateString('it-IT')}\n`;
+                
+                // Aggiungi indicatore se necessita refresh
+                if (this.needsGroupRefresh(ann)) {
+                    message += '🔄 *Timer da aggiornare*\n';
+                }
+                
+                message += '\n';
             }
             
             await this.bot.chatCleaner.editOrReplace(ctx, message, {
@@ -1257,7 +1264,7 @@ class CallbackHandler {
                 `📋 **DETTAGLI ANNUNCIO**\n\n${detailText}${expiryInfo}`,
                 {
                     parse_mode: 'Markdown',
-                    reply_markup: Keyboards.getAnnouncementActionsKeyboard(announcement.announcementId).reply_markup,
+                    reply_markup: Keyboards.getAnnouncementActionsKeyboard(announcement).reply_markup,
                     messageType: 'announcement_details'
                 }
             );
@@ -1333,7 +1340,7 @@ class CallbackHandler {
                 `📋 **DETTAGLI ANNUNCIO**\n\n${detailText}`,
                 {
                     parse_mode: 'Markdown',
-                    reply_markup: Keyboards.getAnnouncementActionsKeyboard(announcement.announcementId).reply_markup
+                    reply_markup: Keyboards.getAnnouncementActionsKeyboard(announcement).reply_markup
                 }
             );
         });
@@ -1441,7 +1448,7 @@ class CallbackHandler {
             }
         });
         
-        // NUOVO: Gestione estensione da notifica
+        // NUOVO: Gestione estensione da notifica con refresh migliorato
         this.bot.bot.action(/^extend_ann_notify_(.+)$/, async (ctx) => {
             await ctx.answerCbQuery();
             const announcementId = ctx.match[1];
@@ -1452,22 +1459,18 @@ class CallbackHandler {
             );
             
             if (extended) {
-                await ctx.editMessageText(
-                    '✅ **ANNUNCIO ESTESO!**\n\n' +
-                    'Il tuo annuncio è stato esteso per altre 24 ore.',
-                    { parse_mode: 'Markdown' }
-                );
-                
-                // Aggiorna anche il messaggio nel gruppo
+                // Prima prova ad aggiornare automaticamente
                 const announcement = await this.bot.announcementService.getAnnouncement(announcementId);
+                let updateSuccess = false;
+                
                 if (announcement && announcement.messageId) {
-                    const userStats = await this.bot.userService.getUserStats(announcement.userId);
-                    const updatedMessage = this.bot.announcementService.formatAnnouncementForGroup(
-                        announcement,
-                        userStats
-                    );
-                    
                     try {
+                        const userStats = await this.bot.userService.getUserStats(announcement.userId);
+                        const updatedMessage = this.bot.announcementService.formatAnnouncementForGroup(
+                            announcement,
+                            userStats
+                        );
+                        
                         await ctx.telegram.editMessageText(
                             this.bot.groupId,
                             announcement.messageId,
@@ -1486,12 +1489,143 @@ class CallbackHandler {
                                 }
                             }
                         );
+                        
+                        // Aggiorna lastRefreshedAt
+                        await this.bot.announcementService.updateAnnouncement(
+                            announcementId,
+                            { lastRefreshedAt: new Date() }
+                        );
+                        
+                        updateSuccess = true;
+                        
                     } catch (error) {
-                        console.error('Error updating extended announcement in group:', error);
+                        console.error('Auto-update failed:', error);
                     }
+                }
+                
+                // Mostra messaggio appropriato
+                if (updateSuccess) {
+                    await ctx.editMessageText(
+                        '✅ **ANNUNCIO ESTESO E AGGIORNATO!**\n\n' +
+                        'Il tuo annuncio è stato esteso per altre 24 ore e il timer nel gruppo è stato aggiornato.',
+                        { parse_mode: 'Markdown' }
+                    );
+                } else {
+                    // Se fallisce, suggerisci di farlo dai dettagli
+                    await ctx.editMessageText(
+                        '✅ **ANNUNCIO ESTESO!**\n\n' +
+                        'Il tuo annuncio è stato esteso per altre 24 ore.\n\n' +
+                        '💡 Per aggiornare il timer nel gruppo:\n' +
+                        '1. Vai in "📊 I miei annunci"\n' +
+                        '2. Seleziona questo annuncio\n' +
+                        '3. Clicca "🔄 Aggiorna timer" se disponibile',
+                        { 
+                            parse_mode: 'Markdown',
+                            reply_markup: {
+                                inline_keyboard: [[
+                                    { text: '📊 Vai ai miei annunci', callback_data: 'my_announcements' }
+                                ]]
+                            }
+                        }
+                    );
                 }
             } else {
                 await ctx.editMessageText('❌ Errore nell\'estensione.');
+            }
+        });
+        
+        // NUOVO: Callback per refresh manuale timer
+        this.bot.bot.action(/^refresh_ann_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const shortId = ctx.match[1];
+            
+            const announcement = await this.bot.findAnnouncementByShortId(shortId, ctx.from.id);
+            if (!announcement) {
+                await ctx.editMessageText('❌ Annuncio non trovato.');
+                return;
+            }
+            
+            if (!announcement.messageId) {
+                await ctx.editMessageText('❌ Questo annuncio non ha un messaggio nel gruppo.');
+                return;
+            }
+            
+            // Mostra loading
+            await ctx.editMessageText('🔄 **Aggiornamento timer in corso...**', { parse_mode: 'Markdown' });
+            
+            const userStats = await this.bot.userService.getUserStats(announcement.userId);
+            const updatedMessage = this.bot.announcementService.formatAnnouncementForGroup(
+                announcement,
+                userStats
+            );
+            
+            try {
+                await ctx.telegram.editMessageText(
+                    this.bot.groupId,
+                    announcement.messageId,
+                    null,
+                    updatedMessage,
+                    {
+                        parse_mode: 'Markdown',
+                        message_thread_id: parseInt(this.bot.topicId),
+                        reply_markup: {
+                            inline_keyboard: [[
+                                { 
+                                    text: '🛒 Contatta venditore', 
+                                    url: `t.me/${process.env.BOT_USERNAME}?start=contact_${announcement.announcementId}` 
+                                }
+                            ]]
+                        }
+                    }
+                );
+                
+                // Aggiorna lastRefreshedAt
+                await this.bot.announcementService.updateAnnouncement(
+                    announcement.announcementId,
+                    { lastRefreshedAt: new Date() }
+                );
+                
+                // Mostra successo e torna ai dettagli
+                await ctx.editMessageText(
+                    '✅ **Timer aggiornati!**\n\nIl tuo annuncio nel gruppo ora mostra i timer corretti.',
+                    { parse_mode: 'Markdown' }
+                );
+                
+                // Dopo 2 secondi, torna ai dettagli annuncio
+                setTimeout(async () => {
+                    const updatedAnn = await this.bot.announcementService.getAnnouncement(announcement.announcementId);
+                    const detailText = await this.bot.announcementService.formatAnnouncementMessage(
+                        updatedAnn,
+                        userStats
+                    );
+                    
+                    await ctx.editMessageText(
+                        `📋 **DETTAGLI ANNUNCIO**\n\n${detailText}`,
+                        {
+                            parse_mode: 'Markdown',
+                            reply_markup: Keyboards.getAnnouncementActionsKeyboard(updatedAnn).reply_markup
+                        }
+                    );
+                }, 2000);
+                
+            } catch (error) {
+                console.error('Refresh error:', error);
+                
+                let errorMsg = '❌ **Impossibile aggiornare**\n\n';
+                if (error.description?.includes('message is not modified')) {
+                    errorMsg = '✅ Il messaggio nel gruppo è già aggiornato!';
+                } else {
+                    errorMsg += 'Il timer verrà aggiornato automaticamente entro 15 minuti.';
+                }
+                
+                await ctx.editMessageText(errorMsg, { 
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [[
+                            { text: '🔙 Torna ai dettagli', callback_data: `view_ann_${shortId}` }
+                        ]]
+                    }
+                });
             }
         });
         
@@ -2459,6 +2593,18 @@ class CallbackHandler {
                 }
             }
         );
+    }
+
+    // Helper per verificare se un annuncio necessita refresh
+    needsGroupRefresh(announcement) {
+        if (!announcement.lastRefreshedAt || !announcement.updatedAt) return false;
+        
+        // Se è stato esteso ma non refreshato nel gruppo
+        const extendedRecently = announcement.updatedAt > announcement.lastRefreshedAt;
+        const timeSinceUpdate = Date.now() - announcement.updatedAt.getTime();
+        const lessThan1Hour = timeSinceUpdate < 60 * 60 * 1000;
+        
+        return extendedRecently && lessThan1Hour;
     }
 }
 
