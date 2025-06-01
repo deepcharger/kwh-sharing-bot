@@ -234,16 +234,22 @@ class AnnouncementService {
         
         if (userStats && userStats.totalFeedback >= 5) {
             if (userStats.positivePercentage >= 95) {
-                sellerInfo += ` 🌟 TOP`;
+                sellerInfo += ` 🌟 **VENDITORE TOP**`;
+                message += sellerInfo + '\n';
+                message += `⭐ ${userStats.positivePercentage}% feedback positivi (${userStats.totalFeedback} recensioni)\n`;
             } else if (userStats.positivePercentage >= 90) {
-                sellerInfo += ` ✅ AFFIDABILE`;
+                sellerInfo += ` ✅ **VENDITORE AFFIDABILE**`;
+                message += sellerInfo + '\n';
+                message += `⭐ ${userStats.positivePercentage}% feedback positivi (${userStats.totalFeedback} recensioni)\n`;
+            } else {
+                message += sellerInfo + '\n';
             }
+        } else {
+            message += sellerInfo + '\n';
         }
         
-        message += sellerInfo + '\n';
-        
         // ID annuncio all'inizio per visibilità
-        message += `🆔 ID annuncio: \`${announcement.announcementId}\`\n`;
+        message += `🆔 ID annuncio: \`${announcement.announcementId}\`\n\n`;
         
         // Pricing
         if (announcement.pricingType === 'fixed') {
