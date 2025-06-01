@@ -429,16 +429,51 @@ function createTransactionScene(bot) {
         const updatedTx = await bot.transactionService.getTransaction(transaction.transactionId);
 
         try {
-            const price = announcement?.price || announcement?.basePrice || 0;
-            const amount = (updatedTx.declaredKwh * price).toFixed(2);
+            // FIX: USA I VALORI GIÀ CALCOLATI NELLA TRANSAZIONE
+            let amount;
+            let priceInfo = '';
+            
+            if (updatedTx.totalAmount) {
+                // Usa il totale già calcolato
+                amount = updatedTx.totalAmount.toFixed(2);
+                
+                // Aggiungi info sul prezzo se disponibili
+                if (updatedTx.pricePerKwh) {
+                    priceInfo = `💰 Prezzo: ${updatedTx.pricePerKwh}€/KWH\n`;
+                }
+                
+                // Se è prezzo graduato, mostra la fascia applicata
+                if (announcement?.pricingType === 'graduated' && updatedTx.appliedTier) {
+                    if (updatedTx.appliedTier.limit) {
+                        priceInfo += `📊 Fascia applicata: fino a ${updatedTx.appliedTier.limit} KWH\n`;
+                    } else {
+                        priceInfo += `📊 Fascia applicata: oltre ${announcement.pricingTiers[announcement.pricingTiers.length - 2]?.limit || '?'} KWH\n`;
+                    }
+                }
+            } else {
+                // Fallback: calcolo manuale (non dovrebbe mai accadere se il flusso è corretto)
+                console.warn('ATTENZIONE: totalAmount non trovato, usando calcolo fallback');
+                const price = announcement?.price || announcement?.basePrice || 0;
+                amount = (updatedTx.declaredKwh * price).toFixed(2);
+            }
+            
+            // Messaggio dettagliato per l'acquirente
+            let buyerMessage = `✅ **KWH CONFERMATI**\n\n` +
+                `Il venditore ha confermato ${updatedTx.declaredKwh} KWH.\n\n`;
+            
+            // Se è stato applicato il minimo, notifica
+            if (updatedTx.actualKwh && updatedTx.actualKwh < updatedTx.declaredKwh) {
+                buyerMessage += `⚠️ **Nota:** Hai ricaricato ${updatedTx.actualKwh} KWH ma pagherai per il minimo garantito di ${updatedTx.declaredKwh} KWH.\n\n`;
+            }
+            
+            buyerMessage += priceInfo;
+            buyerMessage += `💵 **Totale da pagare: €${amount}**\n\n`;
+            buyerMessage += `Procedi con il pagamento come concordato.\n\n`;
+            buyerMessage += `ID: \`${transaction.transactionId}\``;
             
             await ctx.telegram.sendMessage(
                 transaction.buyerId,
-                `✅ **KWH CONFERMATI**\n\n` +
-                `Il venditore ha confermato ${updatedTx.declaredKwh} KWH.\n` +
-                `💰 Totale da pagare: €${amount}\n\n` +
-                `Procedi con il pagamento come concordato.\n\n` +
-                `ID: \`${transaction.transactionId}\``,
+                buyerMessage,
                 {
                     parse_mode: 'Markdown',
                     reply_markup: {
