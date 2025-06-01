@@ -295,15 +295,51 @@ class Keyboards {
         return Markup.inlineKeyboard(buttons);
     }
 
-    static getAnnouncementActionsKeyboard(announcementId) {
-        const shortId = this.createShortId(announcementId);
-        return Markup.inlineKeyboard([
-            [Markup.button.callback('🔄 Estendi 24h', `extend_ann_${shortId}`)], // NUOVO
+    // METODO AGGIORNATO: Gestione dinamica del bottone refresh
+    static getAnnouncementActionsKeyboard(announcement) {
+        const shortId = this.createShortId(announcement.announcementId);
+        const buttons = [];
+        
+        // Prima riga: azioni temporali
+        const timeButtons = [];
+        
+        // Mostra "Estendi" se sta per scadere (meno di 4 ore)
+        if (announcement.expiresAt) {
+            const hoursRemaining = (announcement.expiresAt - new Date()) / (1000 * 60 * 60);
+            if (hoursRemaining < 4) {
+                timeButtons.push(Markup.button.callback('🔄 Estendi 24h', `extend_ann_${shortId}`));
+            }
+        }
+        
+        // Mostra "Aggiorna timer" se è stato modificato/esteso di recente
+        if (this.needsGroupRefresh(announcement)) {
+            timeButtons.push(Markup.button.callback('🔄 Aggiorna timer', `refresh_ann_${shortId}`));
+        }
+        
+        if (timeButtons.length > 0) {
+            buttons.push(timeButtons);
+        }
+        
+        // Altre azioni
+        buttons.push(
             [Markup.button.callback('✏️ Modifica', `edit_ann_${shortId}`)],
             [Markup.button.callback('❌ Elimina', `delete_ann_${shortId}`)],
             [Markup.button.callback('📊 Statistiche', `stats_ann_${shortId}`)],
             [Markup.button.callback('🔙 Indietro', 'my_announcements')]
-        ]);
+        );
+        
+        return Markup.inlineKeyboard(buttons);
+    }
+
+    // METODO HELPER: Verifica se serve refresh del gruppo
+    static needsGroupRefresh(announcement) {
+        if (!announcement.lastRefreshedAt || !announcement.updatedAt) return false;
+        
+        const extendedRecently = announcement.updatedAt > announcement.lastRefreshedAt;
+        const timeSinceUpdate = Date.now() - announcement.updatedAt.getTime();
+        const lessThan1Hour = timeSinceUpdate < 60 * 60 * 1000;
+        
+        return extendedRecently && lessThan1Hour;
     }
 
     static getConfirmDeleteKeyboard(announcementId) {
