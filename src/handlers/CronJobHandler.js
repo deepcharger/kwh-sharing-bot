@@ -45,7 +45,7 @@ class CronJobHandler {
             });
         }
 
-        // NUOVO: Controlla annunci scaduti ogni 5 minuti
+        // Controlla annunci scaduti ogni 5 minuti
         cron.schedule('*/5 * * * *', async () => {
             try {
                 await this.handleExpiredAnnouncements();
@@ -54,7 +54,7 @@ class CronJobHandler {
             }
         });
         
-        // NUOVO: Aggiorna i timer negli annunci ogni 15 minuti
+        // Aggiorna i timer negli annunci ogni 15 minuti
         cron.schedule('*/15 * * * *', async () => {
             try {
                 await this.refreshAnnouncementTimers();
@@ -63,7 +63,7 @@ class CronJobHandler {
             }
         });
         
-        // NUOVO: Notifica annunci in scadenza (1 ora prima) - ogni ora
+        // Notifica annunci in scadenza (1 ora prima) - ogni ora
         cron.schedule('0 * * * *', async () => {
             try {
                 await this.notifyExpiringAnnouncements();
@@ -209,7 +209,7 @@ class CronJobHandler {
                             }
                         );
                         
-                        // Aggiorna timestamp refresh
+                        // IMPORTANTE: Aggiorna timestamp refresh
                         await this.bot.announcementService.updateAnnouncement(
                             announcement.announcementId,
                             { lastRefreshedAt: now }
