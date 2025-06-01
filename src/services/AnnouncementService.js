@@ -6,6 +6,9 @@ class AnnouncementService {
 
     async createAnnouncement(data) {
         try {
+            const now = new Date();
+            const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 ore
+            
             const announcement = {
                 announcementId: `A${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                 userId: data.userId,
@@ -17,8 +20,10 @@ class AnnouncementService {
                 paymentMethods: data.paymentMethods,
                 active: true,
                 messageId: null,
-                createdAt: new Date(),
-                updatedAt: new Date(),
+                createdAt: now,
+                updatedAt: now,
+                expiresAt: expiresAt, // NUOVO: data di scadenza
+                lastRefreshedAt: now, // NUOVO: ultimo refresh del messaggio
                 
                 // Nuovi campi per sistema prezzi
                 description: data.description || '',
@@ -116,6 +121,99 @@ class AnnouncementService {
         }
     }
 
+    // NUOVO: Metodo per estendere la scadenza
+    async extendAnnouncement(announcementId, userId) {
+        try {
+            const now = new Date();
+            const newExpiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+            
+            const result = await this.collection.updateOne(
+                { 
+                    announcementId: announcementId, 
+                    userId: userId,
+                    active: true
+                },
+                { 
+                    $set: { 
+                        expiresAt: newExpiresAt,
+                        updatedAt: now
+                    } 
+                }
+            );
+            
+            return result.modifiedCount > 0;
+        } catch (error) {
+            console.error('Error extending announcement:', error);
+            throw error;
+        }
+    }
+
+    // NUOVO: Metodo per ottenere annunci in scadenza
+    async getExpiringAnnouncements() {
+        try {
+            const now = new Date();
+            const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
+            
+            return await this.collection
+                .find({ 
+                    active: true,
+                    expiresAt: { 
+                        $gte: now,
+                        $lte: oneHourFromNow 
+                    }
+                })
+                .toArray();
+        } catch (error) {
+            console.error('Error getting expiring announcements:', error);
+            throw error;
+        }
+    }
+
+    // NUOVO: Metodo per ottenere annunci scaduti
+    async getExpiredAnnouncements() {
+        try {
+            const now = new Date();
+            
+            return await this.collection
+                .find({ 
+                    active: true,
+                    expiresAt: { $lt: now }
+                })
+                .toArray();
+        } catch (error) {
+            console.error('Error getting expired announcements:', error);
+            throw error;
+        }
+    }
+
+    // NUOVO: Metodo per formattare il tempo relativo
+    formatTimeAgo(date) {
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        
+        if (diffMins < 1) return 'ora';
+        if (diffMins < 60) return `${diffMins} minut${diffMins === 1 ? 'o' : 'i'} fa`;
+        if (diffHours < 24) return `${diffHours} or${diffHours === 1 ? 'a' : 'e'} fa`;
+        return `${diffDays} giorn${diffDays === 1 ? 'o' : 'i'} fa`;
+    }
+
+    // NUOVO: Metodo per formattare il tempo rimanente
+    formatTimeRemaining(expiresAt) {
+        const now = new Date();
+        const diffMs = expiresAt - now;
+        
+        if (diffMs <= 0) return 'SCADUTO';
+        
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        
+        if (diffMins < 60) return `${diffMins} minut${diffMins === 1 ? 'o' : 'i'}`;
+        return `${diffHours} or${diffHours === 1 ? 'a' : 'e'}`;
+    }
+
     async getAnnouncementStats() {
         try {
             const stats = await this.collection.aggregate([
@@ -185,6 +283,13 @@ class AnnouncementService {
             }
         }
         
+        // Info temporali
+        if (announcement.createdAt && announcement.expiresAt) {
+            const timeAgo = this.formatTimeAgo(announcement.createdAt);
+            const timeRemaining = this.formatTimeRemaining(announcement.expiresAt);
+            message += `⏰ **Pubblicato:** ${timeAgo} • **Scade tra:** ${timeRemaining}\n`;
+        }
+        
         // Posizione copiabile
         message += `\n📍 **Posizione:** \`${announcement.location}\`\n`;
         
@@ -248,8 +353,17 @@ class AnnouncementService {
             message += sellerInfo + '\n';
         }
         
-        // ID annuncio all'inizio per visibilità
-        message += `🆔 ID annuncio: \`${announcement.announcementId}\`\n\n`;
+        // ID annuncio
+        message += `🆔 ID annuncio: \`${announcement.announcementId}\`\n`;
+        
+        // NUOVO: Informazioni temporali
+        if (announcement.createdAt && announcement.expiresAt) {
+            const timeAgo = this.formatTimeAgo(announcement.createdAt);
+            const timeRemaining = this.formatTimeRemaining(announcement.expiresAt);
+            message += `⏰ Pubblicato: ${timeAgo} • Scade tra: ${timeRemaining}\n`;
+        }
+        
+        message += '\n';
         
         // Pricing
         if (announcement.pricingType === 'fixed') {
