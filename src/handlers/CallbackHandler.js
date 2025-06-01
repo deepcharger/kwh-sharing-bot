@@ -1126,6 +1126,15 @@ class CallbackHandler {
                 'buy'
             );
 
+            // Mostra i dettagli finali nel messaggio di conferma
+            let completionDetails = '';
+            if (transaction.totalAmount) {
+                completionDetails = `\n\n💰 **Riepilogo finale:**\n`;
+                completionDetails += `• KWH erogati: ${transaction.actualKwh || transaction.declaredKwh}\n`;
+                completionDetails += `• Prezzo unitario: ${transaction.pricePerKwh}€/KWH\n`;
+                completionDetails += `• Importo totale: €${transaction.totalAmount.toFixed(2)}`;
+            }
+
             // NOTIFICA ENTRAMBI PER IL FEEDBACK
             
             // 1. Notifica all'acquirente
@@ -1133,7 +1142,7 @@ class CallbackHandler {
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                     `🎉 **TRANSAZIONE COMPLETATA!**\n\n` +
-                    `Il venditore ha confermato la ricezione del pagamento.\n\n` +
+                    `Il venditore ha confermato la ricezione del pagamento.${completionDetails}\n\n` +
                     `⭐ **Lascia un feedback**\n` +
                     `La tua valutazione aiuta la community a crescere.\n\n` +
                     `🔍 ID Transazione: \`${transactionId}\``,
@@ -1150,12 +1159,12 @@ class CallbackHandler {
                 console.error('Error notifying buyer for feedback:', error);
             }
 
-            // 2. Notifica al venditore (NUOVO!)
+            // 2. Notifica al venditore
             try {
                 await this.bot.chatCleaner.sendPersistentMessage(
                     { telegram: ctx.telegram, from: { id: transaction.sellerId } },
                     `🎉 **TRANSAZIONE COMPLETATA!**\n\n` +
-                    `Hai confermato la ricezione del pagamento.\n\n` +
+                    `Hai confermato la ricezione del pagamento.${completionDetails}\n\n` +
                     `⭐ **Lascia un feedback**\n` +
                     `Valuta l'acquirente per aiutare la community.\n\n` +
                     `🔍 ID Transazione: \`${transactionId}\``,
@@ -1475,7 +1484,7 @@ class CallbackHandler {
                     { telegram: ctx.telegram, from: { id: transaction.buyerId } },
                     `⚠️ **PROBLEMI TECNICI**\n\n` +
                     `Il venditore segnala problemi tecnici con l'attivazione della ricarica.\n\n` +
-                    `Attendere ulteriori comunicazioni o contattare direttamente il venditore.`,
+                    `Attendere ulteriori comunicazioni o contattare il venditore direttamente.`,
                     { parse_mode: 'Markdown' }
                 );
             } catch (error) {
@@ -1848,7 +1857,7 @@ class CallbackHandler {
             );
         });
 
-        // KWH validation callbacks - FIX PER I MINIMI GARANTITI
+        // KWH validation callbacks - FIX PER I PREZZI GRADUATI
         this.bot.bot.action(/^kwh_ok_(.+)$/, async (ctx) => {
             await ctx.answerCbQuery();
             const shortId = ctx.match[1];
@@ -1867,9 +1876,10 @@ class CallbackHandler {
             const announcement = await this.bot.announcementService.getAnnouncement(transaction.announcementId);
 
             try {
-                // IMPORTANTE: Qui il declaredKwh è già stato calcolato con il minimo applicato nella TransactionScene
-                const amount = announcement && transaction.declaredKwh ? 
-                    (transaction.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
+                // USA I VALORI GIÀ CALCOLATI NELLA TRANSAZIONE
+                const amount = transaction.totalAmount ? 
+                    transaction.totalAmount.toFixed(2) : 
+                    'ERRORE CALCOLO';
                 
                 // Prepara il messaggio per l'acquirente
                 let buyerMessage = `✅ **KWH CONFERMATI DAL VENDITORE**\n\n`;
@@ -1881,9 +1891,27 @@ class CallbackHandler {
                     buyerMessage += `Il venditore ha confermato la ricezione di ${transaction.declaredKwh} KWH.\n\n`;
                 }
                 
+                // Aggiungi dettagli sul prezzo se disponibili
+                if (transaction.pricePerKwh) {
+                    buyerMessage += `💰 **Dettagli pagamento:**\n`;
+                    buyerMessage += `• Prezzo unitario: ${transaction.pricePerKwh}€/KWH\n`;
+                    
+                    if (announcement?.pricingType === 'graduated' && transaction.appliedTier) {
+                        buyerMessage += `• Fascia applicata: `;
+                        if (transaction.appliedTier.limit) {
+                            buyerMessage += `fino a ${transaction.appliedTier.limit} KWH\n`;
+                        } else {
+                            buyerMessage += `oltre ${announcement.pricingTiers[announcement.pricingTiers.length - 2].limit} KWH\n`;
+                        }
+                    }
+                    
+                    buyerMessage += `• **Totale da pagare: €${amount}**\n\n`;
+                } else {
+                    buyerMessage += `💰 **Importo totale: €${amount}**\n\n`;
+                }
+                
                 buyerMessage += `💳 **Procedi con il pagamento**\n` +
-                    `💰 Importo: €${amount}\n` +
-                    `💳 Metodi accettati: ${MarkdownEscape.escape(announcement?.paymentMethods || 'Come concordato')}\n\n` +
+                    `Metodi accettati: ${MarkdownEscape.escape(announcement?.paymentMethods || 'Come concordato')}\n\n` +
                     `Una volta effettuato il pagamento, premi il pulsante qui sotto.\n\n` +
                     `🔍 ID Transazione: \`${transaction.transactionId}\``;
                 
@@ -2240,7 +2268,7 @@ class CallbackHandler {
         });
     }
 
-    // Helper method for payment confirmation processing
+    // Helper method per processare la conferma del pagamento
     async processPaymentConfirmation(ctx, transactionId) {
         const transaction = await this.bot.transactionService.getTransaction(transactionId);
         
@@ -2254,9 +2282,10 @@ class CallbackHandler {
             return;
         }
         
-        const announcement = await this.bot.announcementService.getAnnouncement(transaction.announcementId);
-        const amount = announcement && transaction.declaredKwh ? 
-            (transaction.declaredKwh * (announcement.price || announcement.basePrice)).toFixed(2) : 'N/A';
+        // USA L'IMPORTO GIÀ CALCOLATO NELLA TRANSAZIONE
+        const amount = transaction.totalAmount ? 
+            transaction.totalAmount.toFixed(2) : 
+            'ERRORE CALCOLO';
         
         try {
             // Messaggio importante per il seller - mantieni persistente
@@ -2266,6 +2295,7 @@ class CallbackHandler {
                 `L'acquirente @${MarkdownEscape.escape(ctx.from.username || ctx.from.first_name)} dichiara di aver pagato.\n\n` +
                 `💰 Importo dichiarato: €${amount}\n` +
                 `⚡ KWH forniti: ${transaction.declaredKwh || 'N/A'}\n` +
+                `💰 Prezzo unitario: ${transaction.pricePerKwh || 'N/A'}€/KWH\n` +
                 `🔍 ID Transazione: \`${transactionId}\`\n\n` +
                 `Hai ricevuto il pagamento?`,
                 {
@@ -2284,6 +2314,7 @@ class CallbackHandler {
         await ctx.editMessageText(
             `✅ **DICHIARAZIONE PAGAMENTO INVIATA!**\n\n` +
             `🆔 Transazione: \`${transactionId}\`\n` +
+            `⚡ KWH: ${transaction.declaredKwh}\n` +
             `💰 Importo: €${amount}\n\n` +
             `Il venditore riceverà una notifica e dovrà confermare la ricezione del pagamento.\n\n` +
             `Riceverai aggiornamenti sullo stato della transazione.`,
