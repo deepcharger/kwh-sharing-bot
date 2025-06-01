@@ -156,22 +156,99 @@ Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
         return '💰 **Prezzo:** Errore configurazione';
     }
 
-    // Calcolo esempi di prezzo
-    static formatPriceExamples(announcement, exampleKwh = [10, 30, 50, 100]) {
+    // VERSIONE MIGLIORATA: Calcolo esempi di prezzo con indicazione chiara delle fasce
+    static formatPriceExamples(announcement) {
         let examples = `💡 **Esempi di costo:**\n`;
         
-        for (const kwh of exampleKwh) {
-            try {
+        // Per prezzi fissi, mantieni il comportamento attuale semplice
+        if (announcement.pricingType === 'fixed') {
+            const exampleKwh = [10, 30, 50];
+            for (const kwh of exampleKwh) {
                 const calculation = this.calculateExamplePrice(announcement, kwh);
                 examples += `• ${kwh} KWH → €${calculation.totalAmount.toFixed(2)}`;
                 
                 if (calculation.appliedMinimum) {
-                    examples += ` *(minimo ${calculation.kwhUsed} KWH)*`;
+                    examples += ` *(min ${calculation.kwhUsed} KWH)*`;
+                }
+                examples += `\n`;
+            }
+            return examples.trim();
+        }
+        
+        // Per prezzi graduati, mostra chiaramente il cambio fascia
+        if (announcement.pricingType === 'graduated' && announcement.pricingTiers) {
+            const examples_list = [];
+            
+            // Per ogni fascia, mostra un esempio
+            for (let i = 0; i < announcement.pricingTiers.length; i++) {
+                const tier = announcement.pricingTiers[i];
+                const prevTier = i > 0 ? announcement.pricingTiers[i-1] : null;
+                
+                if (tier.limit !== null) {
+                    // Esempio al limite della fascia corrente
+                    const calc = this.calculateExamplePrice(announcement, tier.limit);
+                    examples_list.push({
+                        kwh: tier.limit,
+                        total: calc.totalAmount.toFixed(2),
+                        price: calc.pricePerKwh,
+                        isLimit: true
+                    });
+                    
+                    // Se c'è una fascia successiva, mostra esempio appena oltre il limite
+                    if (i < announcement.pricingTiers.length - 1) {
+                        const nextCalc = this.calculateExamplePrice(announcement, tier.limit + 1);
+                        examples_list.push({
+                            kwh: tier.limit + 1,
+                            total: nextCalc.totalAmount.toFixed(2),
+                            price: nextCalc.pricePerKwh,
+                            isAfterLimit: true
+                        });
+                    }
+                } else {
+                    // Fascia finale "oltre X"
+                    const exampleKwh = prevTier ? prevTier.limit + 20 : 50;
+                    const calc = this.calculateExamplePrice(announcement, exampleKwh);
+                    examples_list.push({
+                        kwh: exampleKwh,
+                        total: calc.totalAmount.toFixed(2),
+                        price: calc.pricePerKwh
+                    });
+                }
+            }
+            
+            // Aggiungi anche un esempio iniziale se il minimo è significativo
+            if (announcement.minimumKwh && announcement.minimumKwh > 5) {
+                const minCalc = this.calculateExamplePrice(announcement, announcement.minimumKwh - 5);
+                examples = `• ${announcement.minimumKwh - 5} KWH → €${minCalc.totalAmount.toFixed(2)} *(min ${minCalc.kwhUsed} KWH)*\n`;
+            }
+            
+            // Costruisci gli esempi con indicazioni chiare
+            let prevPrice = null;
+            for (const ex of examples_list) {
+                examples += `• ${ex.kwh} KWH → €${ex.total}`;
+                
+                // Aggiungi indicazione prezzo/kwh se cambia
+                if (prevPrice !== null && ex.price !== prevPrice) {
+                    examples += ` ⬇️ (ora ${ex.price}€/KWH)`;
+                } else {
+                    examples += ` (${ex.price}€/KWH)`;
                 }
                 
                 examples += `\n`;
-            } catch (error) {
-                continue;
+                prevPrice = ex.price;
+            }
+            
+            // Aggiungi nota esplicativa se ci sono salti di prezzo evidenti
+            if (announcement.pricingTiers.length > 1) {
+                const firstTier = announcement.pricingTiers[0];
+                const secondTier = announcement.pricingTiers[1];
+                
+                if (firstTier.limit && secondTier.price < firstTier.price) {
+                    const saving = (firstTier.limit * firstTier.price) - ((firstTier.limit + 1) * secondTier.price);
+                    if (saving > 0) {
+                        examples += `\n💰 **Nota:** Superando i ${firstTier.limit} KWH risparmi subito €${saving.toFixed(2)}!`;
+                    }
+                }
             }
         }
         
@@ -357,7 +434,8 @@ Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
             'payment_declared': '💰 Pagamento dichiarato',
             'completed': '🎉 Completata con successo',
             'cancelled': '❌ Annullata',
-            'disputed': '⚠️ In disputa'
+            'disputed': '⚠️ In disputa',
+            'buyer_arrived': '📍 Acquirente arrivato'
         };
         return statusMap[status] || status;
     }
@@ -376,7 +454,8 @@ Il minimo garantito assicura un guadagno minimo anche per ricariche piccole.
             'payment_declared': '💰',
             'completed': '🎉',
             'cancelled': '❌',
-            'disputed': '⚠️'
+            'disputed': '⚠️',
+            'buyer_arrived': '📍'
         };
         return emojiMap[status] || '❓';
     }
