@@ -267,9 +267,25 @@ class Keyboards {
             const displayId = ann.announcementId.length > 20 ? 
                 ann.announcementId.substring(0, 15) + '...' : 
                 ann.announcementId;
+            
+            // Calcola tempo rimanente
+            let timeInfo = '';
+            if (ann.expiresAt) {
+                const now = new Date();
+                const diffMs = ann.expiresAt - now;
+                const diffHours = Math.floor(diffMs / 3600000);
+                
+                if (diffHours <= 0) {
+                    timeInfo = ' ⏰ SCADUTO';
+                } else if (diffHours <= 1) {
+                    timeInfo = ' ⏰ <1h';
+                } else if (diffHours <= 24) {
+                    timeInfo = ` ⏰ ${diffHours}h`;
+                }
+            }
                 
             buttons.push([Markup.button.callback(
-                `📋 ${displayId} - ${ann.price || ann.basePrice}€/KWH`, 
+                `📋 ${displayId} - ${ann.price || ann.basePrice}€/KWH${timeInfo}`, 
                 `view_ann_${this.createShortId(ann.announcementId)}`
             )]);
         });
@@ -282,6 +298,7 @@ class Keyboards {
     static getAnnouncementActionsKeyboard(announcementId) {
         const shortId = this.createShortId(announcementId);
         return Markup.inlineKeyboard([
+            [Markup.button.callback('🔄 Estendi 24h', `extend_ann_${shortId}`)], // NUOVO
             [Markup.button.callback('✏️ Modifica', `edit_ann_${shortId}`)],
             [Markup.button.callback('❌ Elimina', `delete_ann_${shortId}`)],
             [Markup.button.callback('📊 Statistiche', `stats_ann_${shortId}`)],
