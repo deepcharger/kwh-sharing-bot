@@ -328,6 +328,12 @@ class CommandHandler {
                     message += `da ${ann.pricingTiers[0].price}€/KWH`;
                 }
                 
+                // NUOVO: Aggiungi info scadenza
+                if (ann.expiresAt) {
+                    const timeRemaining = this.bot.announcementService.formatTimeRemaining(ann.expiresAt);
+                    message += `\n⏰ Scade tra: ${timeRemaining}`;
+                }
+                
                 message += `\n📅 Pubblicato: ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
             }
             
