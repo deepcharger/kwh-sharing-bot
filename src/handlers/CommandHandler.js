@@ -328,10 +328,16 @@ class CommandHandler {
                     message += `da ${ann.pricingTiers[0].price}€/KWH`;
                 }
                 
-                // NUOVO: Aggiungi info scadenza
+                // Aggiungi info scadenza
                 if (ann.expiresAt) {
                     const timeRemaining = this.bot.announcementService.formatTimeRemaining(ann.expiresAt);
                     message += `\n⏰ Scade tra: ${timeRemaining}`;
+                    
+                    // NUOVO: Aggiungi indicatore se necessita refresh
+                    const needsRefresh = this.needsGroupRefresh(ann);
+                    if (needsRefresh) {
+                        message += ' 🔄';
+                    }
                 }
                 
                 message += `\n📅 Pubblicato: ${ann.createdAt.toLocaleDateString('it-IT')}\n\n`;
@@ -490,6 +496,18 @@ class CommandHandler {
             ctx.session.transactionId = transactionId;
             await this.bot.chatCleaner.enterScene(ctx, 'transactionScene');
         });
+    }
+
+    // NUOVO: Helper per verificare se serve refresh
+    needsGroupRefresh(announcement) {
+        if (!announcement.lastRefreshedAt || !announcement.updatedAt) return false;
+        
+        // Se è stato esteso ma non refreshato nel gruppo
+        const extendedRecently = announcement.updatedAt > announcement.lastRefreshedAt;
+        const timeSinceUpdate = Date.now() - announcement.updatedAt.getTime();
+        const lessThan1Hour = timeSinceUpdate < 60 * 60 * 1000;
+        
+        return extendedRecently && lessThan1Hour;
     }
 }
 
