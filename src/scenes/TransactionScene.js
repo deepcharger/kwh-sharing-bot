@@ -714,13 +714,19 @@ function createTransactionScene(bot) {
                 appliedMinimum = true;
             }
             
+            // Prima calcola il prezzo
+            const calculation = bot.transactionService.calculatePrice(announcement, finalKwh);
+            
             await bot.transactionService.updateTransactionStatus(
                 transaction.transactionId,
                 'kwh_declared',
                 { 
                     declaredKwh: finalKwh,  // Usa i KWH con minimo applicato
                     actualKwh: kwhAmount,   // Salva anche i KWH reali
-                    appliedMinimum: appliedMinimum
+                    appliedMinimum: appliedMinimum,
+                    pricePerKwh: calculation.pricePerKwh,
+                    totalAmount: calculation.totalAmount,
+                    appliedTier: calculation.appliedTier
                 }
             );
 
@@ -733,6 +739,12 @@ function createTransactionScene(bot) {
                 let kwhMessage = appliedMinimum ? 
                     `L'acquirente dichiara ${kwhAmount} KWH.\n⚠️ **Applicato minimo garantito: ${finalKwh} KWH**` :
                     `L'acquirente dichiara ${finalKwh} KWH.`;
+
+                // Aggiungi informazioni sul prezzo
+                if (calculation) {
+                    kwhMessage += `\n💰 **Prezzo:** ${calculation.pricePerKwh}€/KWH`;
+                    kwhMessage += `\n💵 **Totale:** €${calculation.totalAmount.toFixed(2)}`;
+                }
 
                 await ctx.telegram.sendMessage(
                     transaction.sellerId,
