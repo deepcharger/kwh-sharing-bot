@@ -45,6 +45,33 @@ class CronJobHandler {
             });
         }
 
+        // NUOVO: Controlla annunci scaduti ogni 5 minuti
+        cron.schedule('*/5 * * * *', async () => {
+            try {
+                await this.handleExpiredAnnouncements();
+            } catch (error) {
+                console.error('Error handling expired announcements:', error);
+            }
+        });
+        
+        // NUOVO: Aggiorna i timer negli annunci ogni 15 minuti
+        cron.schedule('*/15 * * * *', async () => {
+            try {
+                await this.refreshAnnouncementTimers();
+            } catch (error) {
+                console.error('Error refreshing announcement timers:', error);
+            }
+        });
+        
+        // NUOVO: Notifica annunci in scadenza (1 ora prima) - ogni ora
+        cron.schedule('0 * * * *', async () => {
+            try {
+                await this.notifyExpiringAnnouncements();
+            } catch (error) {
+                console.error('Error notifying expiring announcements:', error);
+            }
+        });
+
         console.log('✅ Cron jobs configured successfully');
     }
 
@@ -94,6 +121,151 @@ class CronJobHandler {
         }
     }
 
+    async handleExpiredAnnouncements() {
+        const expiredAnnouncements = await this.bot.announcementService.getExpiredAnnouncements();
+        
+        for (const announcement of expiredAnnouncements) {
+            try {
+                // Disattiva l'annuncio
+                await this.bot.announcementService.updateAnnouncement(
+                    announcement.announcementId,
+                    { active: false }
+                );
+                
+                // Elimina dal gruppo
+                if (announcement.messageId) {
+                    try {
+                        await this.bot.bot.telegram.deleteMessage(
+                            this.bot.groupId, 
+                            announcement.messageId
+                        );
+                    } catch (deleteError) {
+                        console.log(`Could not delete message ${announcement.messageId}:`, deleteError.description);
+                    }
+                }
+                
+                // Notifica il venditore
+                try {
+                    await this.bot.bot.telegram.sendMessage(
+                        announcement.userId,
+                        `⏰ **ANNUNCIO SCADUTO**\n\n` +
+                        `Il tuo annuncio \`${announcement.announcementId}\` è scaduto dopo 24 ore ed è stato rimosso.\n\n` +
+                        `Puoi pubblicarne uno nuovo quando vuoi dal menu principale.`,
+                        { parse_mode: 'Markdown' }
+                    );
+                } catch (notifyError) {
+                    console.log(`Could not notify user ${announcement.userId}:`, notifyError.description);
+                }
+                
+                console.log(`Expired announcement ${announcement.announcementId} removed`);
+            } catch (error) {
+                console.error(`Error handling expired announcement ${announcement.announcementId}:`, error);
+            }
+        }
+        
+        if (expiredAnnouncements.length > 0) {
+            console.log(`Handled ${expiredAnnouncements.length} expired announcements`);
+        }
+    }
+
+    async refreshAnnouncementTimers() {
+        const activeAnnouncements = await this.bot.announcementService.getActiveAnnouncements(50);
+        let refreshedCount = 0;
+        
+        for (const announcement of activeAnnouncements) {
+            try {
+                // Controlla se è il momento di aggiornare (ogni 15 minuti)
+                const lastRefresh = announcement.lastRefreshedAt || announcement.createdAt;
+                const now = new Date();
+                const timeSinceRefresh = now - lastRefresh;
+                
+                if (timeSinceRefresh >= 15 * 60 * 1000 && announcement.messageId) {
+                    // Ottieni stats utente
+                    const userStats = await this.bot.userService.getUserStats(announcement.userId);
+                    
+                    // Rigenera il messaggio con timer aggiornati
+                    const updatedMessage = this.bot.announcementService.formatAnnouncementForGroup(
+                        announcement, 
+                        userStats
+                    );
+                    
+                    try {
+                        await this.bot.bot.telegram.editMessageText(
+                            this.bot.groupId,
+                            announcement.messageId,
+                            null,
+                            updatedMessage,
+                            {
+                                parse_mode: 'Markdown',
+                                message_thread_id: parseInt(this.bot.topicId),
+                                reply_markup: {
+                                    inline_keyboard: [[
+                                        { 
+                                            text: '🛒 Contatta venditore', 
+                                            url: `t.me/${process.env.BOT_USERNAME}?start=contact_${announcement.announcementId}` 
+                                        }
+                                    ]]
+                                }
+                            }
+                        );
+                        
+                        // Aggiorna timestamp refresh
+                        await this.bot.announcementService.updateAnnouncement(
+                            announcement.announcementId,
+                            { lastRefreshedAt: now }
+                        );
+                        
+                        refreshedCount++;
+                        
+                    } catch (editError) {
+                        // Se non riesce a modificare (messaggio troppo vecchio), ignora
+                        if (!editError.message?.includes('message is not modified')) {
+                            console.error(`Error updating announcement ${announcement.announcementId}:`, editError.description);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error(`Error refreshing announcement ${announcement.announcementId}:`, error);
+            }
+        }
+        
+        if (refreshedCount > 0) {
+            console.log(`Refreshed ${refreshedCount} announcement timers`);
+        }
+    }
+
+    async notifyExpiringAnnouncements() {
+        const expiringAnnouncements = await this.bot.announcementService.getExpiringAnnouncements();
+        
+        for (const announcement of expiringAnnouncements) {
+            try {
+                await this.bot.bot.telegram.sendMessage(
+                    announcement.userId,
+                    `⏰ **ANNUNCIO IN SCADENZA**\n\n` +
+                    `Il tuo annuncio \`${announcement.announcementId}\` scadrà tra 1 ora.\n\n` +
+                    `📍 Zone: ${announcement.zones || announcement.location}\n` +
+                    `💰 Prezzo: ${announcement.basePrice || announcement.price}€/KWH\n\n` +
+                    `Vuoi estenderlo per altre 24 ore?`,
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '🔄 Estendi per 24h', callback_data: `extend_ann_notify_${announcement.announcementId}` }],
+                                [{ text: '❌ Lascia scadere', callback_data: 'dismiss_notification' }]
+                            ]
+                        }
+                    }
+                );
+            } catch (error) {
+                console.error(`Error notifying expiring announcement ${announcement.announcementId}:`, error);
+            }
+        }
+        
+        if (expiringAnnouncements.length > 0) {
+            console.log(`Notified ${expiringAnnouncements.length} expiring announcements`);
+        }
+    }
+
     async sendDailyReport() {
         const stats = await this.bot.transactionService.getTransactionStats();
         const announcementStats = await this.bot.announcementService.getAnnouncementStats();
@@ -120,6 +292,17 @@ class CronJobHandler {
             const successRate = ((stats.overall.completedTransactions / stats.overall.totalTransactions) * 100).toFixed(1);
             dailyReport += `📈 Tasso di successo: ${successRate}%\n`;
         }
+
+        // Add expired announcements count
+        const expiredToday = await this.bot.db.getCollection('announcements')
+            .find({
+                active: false,
+                updatedAt: {
+                    $gte: new Date(new Date().setHours(0, 0, 0, 0))
+                }
+            }).count();
+        
+        dailyReport += `⏰ Annunci scaduti oggi: ${expiredToday}\n`;
 
         dailyReport += `\n📅 Report del ${new Date().toLocaleDateString('it-IT')}`;
         
@@ -162,12 +345,22 @@ class CronJobHandler {
                 lastActivity: { $lt: twoWeeksAgo }
             });
 
-            console.log(`🧹 Weekly cleanup completed: ${result.modifiedCount} transactions archived`);
+            // Clean up expired announcements older than 7 days
+            const oneWeekAgo = new Date();
+            oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+            
+            const expiredCleanup = await this.bot.db.getCollection('announcements').deleteMany({
+                active: false,
+                expiresAt: { $lt: oneWeekAgo }
+            });
+
+            console.log(`🧹 Weekly cleanup completed: ${result.modifiedCount} transactions archived, ${expiredCleanup.deletedCount} old announcements deleted`);
             
             // Send cleanup report to admin
             const cleanupReport = `🧹 **PULIZIA SETTIMANALE COMPLETATA**\n\n` +
                 `📦 Transazioni archiviate: ${result.modifiedCount}\n` +
                 `🗑️ Messaggi vecchi eliminati\n` +
+                `📋 Annunci scaduti rimossi: ${expiredCleanup.deletedCount}\n` +
                 `⏰ Sessioni scadute pulite\n\n` +
                 `✅ Sistema ottimizzato`;
 
