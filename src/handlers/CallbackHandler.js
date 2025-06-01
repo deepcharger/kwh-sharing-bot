@@ -1242,12 +1242,19 @@ class CallbackHandler {
             
             const userStats = await this.bot.userService.getUserStats(announcement.userId);
             const detailText = await this.bot.announcementService.formatAnnouncementMessage(
-                { ...announcement, username: ctx.from.username },
+                announcement,
                 userStats
             );
             
+            // Aggiungi informazioni sulla scadenza
+            let expiryInfo = '';
+            if (announcement.expiresAt) {
+                const timeRemaining = this.bot.announcementService.formatTimeRemaining(announcement.expiresAt);
+                expiryInfo = `\n\n⏰ **Scade tra:** ${timeRemaining}`;
+            }
+            
             await this.bot.chatCleaner.editOrReplace(ctx,
-                `📋 **DETTAGLI ANNUNCIO**\n\n${detailText}`,
+                `📋 **DETTAGLI ANNUNCIO**\n\n${detailText}${expiryInfo}`,
                 {
                     parse_mode: 'Markdown',
                     reply_markup: Keyboards.getAnnouncementActionsKeyboard(announcement.announcementId).reply_markup,
@@ -1318,7 +1325,7 @@ class CallbackHandler {
             
             const userStats = await this.bot.userService.getUserStats(announcement.userId);
             const detailText = await this.bot.announcementService.formatAnnouncementMessage(
-                { ...announcement, username: ctx.from.username },
+                announcement,
                 userStats
             );
             
@@ -1366,6 +1373,131 @@ class CallbackHandler {
                     ]]
                 }
             });
+        });
+
+        // NUOVO: Gestione estensione annuncio
+        this.bot.bot.action(/^extend_ann_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const shortId = ctx.match[1];
+            
+            const announcement = await this.bot.findAnnouncementByShortId(shortId, ctx.from.id);
+            if (!announcement) {
+                await ctx.reply('❌ Annuncio non trovato.');
+                return;
+            }
+            
+            if (announcement.userId !== ctx.from.id) {
+                await ctx.reply('❌ Non sei autorizzato.');
+                return;
+            }
+            
+            const extended = await this.bot.announcementService.extendAnnouncement(
+                announcement.announcementId,
+                ctx.from.id
+            );
+            
+            if (extended) {
+                await ctx.reply(
+                    '✅ **ANNUNCIO ESTESO!**\n\n' +
+                    `Il tuo annuncio \`${announcement.announcementId}\` è stato esteso per altre 24 ore.\n\n` +
+                    'Nuova scadenza: domani alla stessa ora.',
+                    { parse_mode: 'Markdown' }
+                );
+                
+                // Aggiorna il messaggio nel gruppo se esiste
+                if (announcement.messageId) {
+                    const userStats = await this.bot.userService.getUserStats(announcement.userId);
+                    const updatedAnnouncement = await this.bot.announcementService.getAnnouncement(announcement.announcementId);
+                    const updatedMessage = this.bot.announcementService.formatAnnouncementForGroup(
+                        updatedAnnouncement,
+                        userStats
+                    );
+                    
+                    try {
+                        await ctx.telegram.editMessageText(
+                            this.bot.groupId,
+                            announcement.messageId,
+                            null,
+                            updatedMessage,
+                            {
+                                parse_mode: 'Markdown',
+                                message_thread_id: parseInt(this.bot.topicId),
+                                reply_markup: {
+                                    inline_keyboard: [[
+                                        { 
+                                            text: '🛒 Contatta venditore', 
+                                            url: `t.me/${process.env.BOT_USERNAME}?start=contact_${announcement.announcementId}` 
+                                        }
+                                    ]]
+                                }
+                            }
+                        );
+                    } catch (error) {
+                        console.error('Error updating extended announcement:', error);
+                    }
+                }
+            } else {
+                await ctx.reply('❌ Errore nell\'estensione dell\'annuncio.');
+            }
+        });
+        
+        // NUOVO: Gestione estensione da notifica
+        this.bot.bot.action(/^extend_ann_notify_(.+)$/, async (ctx) => {
+            await ctx.answerCbQuery();
+            const announcementId = ctx.match[1];
+            
+            const extended = await this.bot.announcementService.extendAnnouncement(
+                announcementId,
+                ctx.from.id
+            );
+            
+            if (extended) {
+                await ctx.editMessageText(
+                    '✅ **ANNUNCIO ESTESO!**\n\n' +
+                    'Il tuo annuncio è stato esteso per altre 24 ore.',
+                    { parse_mode: 'Markdown' }
+                );
+                
+                // Aggiorna anche il messaggio nel gruppo
+                const announcement = await this.bot.announcementService.getAnnouncement(announcementId);
+                if (announcement && announcement.messageId) {
+                    const userStats = await this.bot.userService.getUserStats(announcement.userId);
+                    const updatedMessage = this.bot.announcementService.formatAnnouncementForGroup(
+                        announcement,
+                        userStats
+                    );
+                    
+                    try {
+                        await ctx.telegram.editMessageText(
+                            this.bot.groupId,
+                            announcement.messageId,
+                            null,
+                            updatedMessage,
+                            {
+                                parse_mode: 'Markdown',
+                                message_thread_id: parseInt(this.bot.topicId),
+                                reply_markup: {
+                                    inline_keyboard: [[
+                                        { 
+                                            text: '🛒 Contatta venditore', 
+                                            url: `t.me/${process.env.BOT_USERNAME}?start=contact_${announcementId}` 
+                                        }
+                                    ]]
+                                }
+                            }
+                        );
+                    } catch (error) {
+                        console.error('Error updating extended announcement in group:', error);
+                    }
+                }
+            } else {
+                await ctx.editMessageText('❌ Errore nell\'estensione.');
+            }
+        });
+        
+        this.bot.bot.action('dismiss_notification', async (ctx) => {
+            await ctx.answerCbQuery();
+            await ctx.deleteMessage();
         });
     }
 
