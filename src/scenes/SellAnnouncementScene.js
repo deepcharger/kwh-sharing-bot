@@ -146,6 +146,7 @@ function createSellAnnouncementScene(bot) {
         // Controlla se è una fascia "oltre"
         const isOltre = input.toLowerCase().startsWith('oltre ') || input.includes('+');
         let parts;
+        let limitValue; // Variabile per memorizzare il valore del limite
         
         if (isOltre) {
             // Gestisci formato "oltre X prezzo" o "X+ prezzo"
@@ -161,6 +162,8 @@ function createSellAnnouncementScene(bot) {
                 );
                 return;
             }
+            
+            limitValue = parseInt(parts[0]); // Salva il valore del limite per il controllo
         } else {
             parts = input.split(/\s+/);
             if (parts.length !== 2) {
@@ -174,6 +177,8 @@ function createSellAnnouncementScene(bot) {
                 );
                 return;
             }
+            
+            limitValue = parseInt(parts[0]); // Salva il valore del limite per il controllo
         }
 
         const limit = parseInt(parts[0]);
@@ -191,11 +196,20 @@ function createSellAnnouncementScene(bot) {
 
         const tiers = ctx.session.announcementData.pricingTiers;
         
-        // Verifica che il limite sia maggiore del precedente
-        if (tiers.length > 0) {
+        // FIX: Verifica che il limite sia maggiore del precedente SOLO se NON è una fascia "oltre"
+        if (tiers.length > 0 && !isOltre) {
             const lastLimit = tiers[tiers.length - 1].limit;
-            if (lastLimit && limit <= lastLimit) {
+            if (lastLimit && limitValue <= lastLimit) {
                 await ctx.reply(`❌ Il limite deve essere maggiore di ${lastLimit}. Riprova:`);
+                return;
+            }
+        }
+        
+        // FIX: Per fasce "oltre", verifica che il limite sia >= all'ultimo limite (non strettamente maggiore)
+        if (tiers.length > 0 && isOltre) {
+            const lastLimit = tiers[tiers.length - 1].limit;
+            if (lastLimit && limitValue < lastLimit) {
+                await ctx.reply(`❌ Il limite 'oltre' deve essere almeno ${lastLimit}. Riprova:`);
                 return;
             }
         }
@@ -211,7 +225,7 @@ function createSellAnnouncementScene(bot) {
                 if (tier.limit) {
                     message += `• ${prevLimit + 1}-${tier.limit} KWH: TUTTO a ${tier.price}€/KWH\n`;
                 } else {
-                    message += `• Oltre ${limit} KWH: TUTTO a ${tier.price}€/KWH\n`;
+                    message += `• Oltre ${limitValue} KWH: TUTTO a ${tier.price}€/KWH\n`;
                 }
             }
             
