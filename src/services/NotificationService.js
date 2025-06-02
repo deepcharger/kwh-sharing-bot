@@ -1,45 +1,39 @@
-// src/services/NotificationService.js - NUOVO FILE
-const EventEmitter = require('events');
-const MarkdownEscape = require('../utils/MarkdownEscape');
+// src/services/NotificationService.js - Servizio centralizzato per le notifiche
+const logger = require('../utils/logger');
 
-class NotificationService extends EventEmitter {
+class NotificationService {
     constructor(bot) {
-        super();
         this.bot = bot;
         this.telegram = bot.bot.telegram;
-        this.chatCleaner = bot.chatCleaner;
-        this.queuedNotifications = new Map();
-        this.notificationStats = {
-            sent: 0,
-            failed: 0,
-            queued: 0
+        this.adminUserId = bot.adminUserId;
+        this.templates = {
+            transactionUpdate: this.getTransactionUpdateTemplate.bind(this),
+            reminder: this.getReminderTemplate.bind(this),
+            announcement: this.getAnnouncementTemplate.bind(this)
         };
     }
 
     /**
-     * Send notification to user
+     * Notify user with message
      */
     async notifyUser(userId, message, options = {}) {
         try {
-            const defaultOptions = {
+            const finalOptions = {
                 parse_mode: 'Markdown',
-                disable_notification: false,
+                disable_web_page_preview: true,
                 ...options
             };
 
-            const result = await this.telegram.sendMessage(userId, message, defaultOptions);
+            const sentMessage = await this.telegram.sendMessage(userId, message, finalOptions);
             
-            this.notificationStats.sent++;
-            this.emit('notificationSent', { userId, type: options.type || 'general' });
-            
-            return result;
+            logger.info(`Notification sent to user ${userId}`);
+            return sentMessage;
         } catch (error) {
-            console.error(`Failed to notify user ${userId}:`, error);
-            this.notificationStats.failed++;
+            logger.error(`Failed to notify user ${userId}:`, error);
             
-            // Queue for retry if user blocked bot
-            if (error.code === 403) {
-                this.queueNotification(userId, message, options);
+            // Try to notify admin if user notification fails
+            if (error.response?.error_code === 403) {
+                await this.notifyAdmin(`User ${userId} has blocked the bot`);
             }
             
             throw error;
@@ -47,324 +41,333 @@ class NotificationService extends EventEmitter {
     }
 
     /**
-     * Send persistent notification (won't be auto-deleted)
+     * Notify transaction update
      */
-    async sendPersistentNotification(userId, message, options = {}) {
+    async notifyTransactionUpdate(transaction, newStatus, data = {}) {
         try {
-            const result = await this.chatCleaner.sendPersistentMessage(
-                { telegram: this.telegram, from: { id: userId } },
-                message,
-                options
+            const { buyerMessage, sellerMessage } = this.templates.transactionUpdate(
+                transaction, 
+                newStatus, 
+                data
             );
-            
-            this.notificationStats.sent++;
-            return result;
-        } catch (error) {
-            console.error(`Failed to send persistent notification to ${userId}:`, error);
-            this.notificationStats.failed++;
-            throw error;
-        }
-    }
 
-    /**
-     * Notify about transaction status change
-     */
-    async notifyTransactionUpdate(transaction, newStatus, additionalData = {}) {
-        const notifications = this.getTransactionNotifications(transaction, newStatus, additionalData);
-        
-        for (const notification of notifications) {
-            try {
-                await this.notifyUser(
-                    notification.userId,
-                    notification.message,
-                    notification.options
+            const notifications = [];
+
+            // Notify buyer
+            if (buyerMessage && transaction.buyerId) {
+                notifications.push(
+                    this.notifyUser(transaction.buyerId, buyerMessage, data.buyerOptions)
                 );
-            } catch (error) {
-                console.error(`Failed to send transaction notification:`, error);
             }
-        }
-    }
 
-    /**
-     * Notify about new announcement
-     */
-    async notifyNewAnnouncement(announcement, targetUsers = []) {
-        const message = this.formatNewAnnouncementMessage(announcement);
-        
-        // If no specific targets, could notify users who have shown interest in similar announcements
-        if (targetUsers.length === 0) {
-            // For now, we don't broadcast to all users
-            return;
-        }
-        
-        for (const userId of targetUsers) {
-            try {
-                await this.notifyUser(userId, message, {
-                    type: 'new_announcement',
-                    reply_markup: {
-                        inline_keyboard: [[
-                            { 
-                                text: '👀 Visualizza dettagli', 
-                                url: `t.me/${process.env.BOT_USERNAME}?start=view_${announcement.announcementId}` 
-                            }
-                        ]]
-                    }
-                });
-            } catch (error) {
-                console.error(`Failed to notify user ${userId} about announcement:`, error);
+            // Notify seller
+            if (sellerMessage && transaction.sellerId) {
+                notifications.push(
+                    this.notifyUser(transaction.sellerId, sellerMessage, data.sellerOptions)
+                );
             }
+
+            await Promise.allSettled(notifications);
+            
+            logger.info(`Transaction update notifications sent for ${transaction.transactionId}`);
+        } catch (error) {
+            logger.error(`Error in notifyTransactionUpdate:`, error);
         }
     }
 
     /**
      * Send reminder notification
      */
-    async sendReminder(userId, reminderType, data) {
-        const message = this.formatReminderMessage(reminderType, data);
-        
-        if (!message) {
-            console.error(`Unknown reminder type: ${reminderType}`);
-            return;
-        }
-        
+    async sendReminder(userId, reminderType, data = {}) {
         try {
-            await this.notifyUser(userId, message, {
-                type: 'reminder',
-                disable_notification: false
-            });
+            const message = this.templates.reminder(reminderType, data);
+            
+            if (!message) {
+                logger.warn(`No template found for reminder type: ${reminderType}`);
+                return;
+            }
+
+            const options = this.getReminderOptions(reminderType, data);
+            await this.notifyUser(userId, message, options);
+            
+            logger.info(`Reminder sent to user ${userId}, type: ${reminderType}`);
         } catch (error) {
-            console.error(`Failed to send reminder to ${userId}:`, error);
+            logger.error(`Error sending reminder to ${userId}:`, error);
         }
     }
 
     /**
-     * Notify admin about critical events
+     * Notify announcement event
      */
-    async notifyAdmin(message, data = {}) {
-        const adminMessage = `🚨 **ADMIN NOTIFICATION**\n\n${message}`;
-        
+    async notifyAnnouncementEvent(announcement, eventType, data = {}) {
         try {
-            await this.notifyUser(this.bot.adminUserId, adminMessage, {
-                type: 'admin_alert',
-                disable_notification: false,
-                ...data
-            });
+            const message = this.templates.announcement(eventType, announcement, data);
+            
+            if (!message) {
+                logger.warn(`No template found for announcement event: ${eventType}`);
+                return;
+            }
+
+            await this.notifyUser(announcement.userId, message, data.options);
+            
+            logger.info(`Announcement notification sent, type: ${eventType}`);
         } catch (error) {
-            console.error('Failed to notify admin:', error);
+            logger.error(`Error in notifyAnnouncementEvent:`, error);
         }
     }
 
     /**
-     * Batch notify multiple users
+     * Notify admin
      */
-    async batchNotify(notifications) {
+    async notifyAdmin(message, options = {}) {
+        try {
+            if (!this.adminUserId) {
+                logger.warn('Admin user ID not configured');
+                return;
+            }
+
+            const adminMessage = `🚨 **ADMIN NOTIFICATION**\n\n${message}`;
+            
+            await this.notifyUser(this.adminUserId, adminMessage, {
+                parse_mode: 'Markdown',
+                ...options
+            });
+            
+            logger.info('Admin notification sent');
+        } catch (error) {
+            logger.error('Error notifying admin:', error);
+        }
+    }
+
+    /**
+     * Broadcast message to multiple users
+     */
+    async broadcast(userIds, message, options = {}) {
         const results = {
-            success: 0,
+            sent: 0,
             failed: 0,
             errors: []
         };
-        
-        for (const { userId, message, options } of notifications) {
+
+        const notifications = userIds.map(async (userId) => {
             try {
                 await this.notifyUser(userId, message, options);
-                results.success++;
+                results.sent++;
             } catch (error) {
                 results.failed++;
                 results.errors.push({ userId, error: error.message });
             }
-        }
+        });
+
+        await Promise.allSettled(notifications);
         
+        logger.info(`Broadcast completed: ${results.sent} sent, ${results.failed} failed`);
         return results;
     }
 
-    // Private helper methods
-    
-    queueNotification(userId, message, options) {
-        if (!this.queuedNotifications.has(userId)) {
-            this.queuedNotifications.set(userId, []);
-        }
+    /**
+     * Schedule notification for later
+     */
+    async scheduleNotification(userId, message, delayMs, options = {}) {
+        setTimeout(async () => {
+            try {
+                await this.notifyUser(userId, message, options);
+                logger.info(`Scheduled notification sent to user ${userId}`);
+            } catch (error) {
+                logger.error(`Error sending scheduled notification to ${userId}:`, error);
+            }
+        }, delayMs);
         
-        this.queuedNotifications.get(userId).push({
-            message,
-            options,
-            timestamp: new Date()
-        });
-        
-        this.notificationStats.queued++;
+        logger.info(`Notification scheduled for user ${userId} in ${delayMs}ms`);
     }
-    
-    getTransactionNotifications(transaction, newStatus, additionalData) {
-        const notifications = [];
-        
-        switch (newStatus) {
-            case 'confirmed':
-                notifications.push({
-                    userId: transaction.buyerId,
-                    message: this.formatTransactionConfirmedMessage(transaction),
-                    options: { type: 'transaction_confirmed' }
-                });
-                break;
-                
-            case 'buyer_arrived':
-                notifications.push({
-                    userId: transaction.sellerId,
-                    message: this.formatBuyerArrivedMessage(transaction, additionalData),
-                    options: { 
-                        type: 'buyer_arrived',
-                        reply_markup: this.getChargingActivationKeyboard(transaction.transactionId)
+
+    // Template Methods
+
+    /**
+     * Get transaction update template
+     */
+    getTransactionUpdateTemplate(transaction, newStatus, data) {
+        const templates = {
+            'buyer_arrived': {
+                sellerMessage: `📍 **ACQUIRENTE ARRIVATO**\n\n` +
+                    `L'acquirente ${data.buyerUsername ? '@' + data.buyerUsername : 'utente'} è arrivato alla colonnina.\n\n` +
+                    `🔍 ID Transazione: \`${transaction.transactionId}\`\n\n` +
+                    `⚡ È il momento di attivare la ricarica!`,
+                sellerOptions: {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '⚡ Attiva ricarica', callback_data: `activate_charging_${transaction.transactionId}` }],
+                            [{ text: '⏸️ Ritarda 5 min', callback_data: `delay_charging_${transaction.transactionId}` }]
+                        ]
                     }
-                });
-                break;
-                
-            case 'charging_started':
-                notifications.push({
-                    userId: transaction.buyerId,
-                    message: this.formatChargingStartedMessage(transaction),
-                    options: {
-                        type: 'charging_started',
-                        reply_markup: this.getChargingConfirmationKeyboard(transaction.transactionId)
+                }
+            },
+
+            'charging_started': {
+                buyerMessage: `⚡ **RICARICA ATTIVATA**\n\n` +
+                    `Il venditore ha attivato la ricarica.\n` +
+                    `Verifica che il processo sia iniziato correttamente.\n\n` +
+                    `🔍 ID Transazione: \`${transaction.transactionId}\``,
+                buyerOptions: {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '✅ Sta caricando', callback_data: `charging_ok_${transaction.transactionId}` },
+                                { text: '❌ Non carica', callback_data: `charging_fail_${transaction.transactionId}` }
+                            ]
+                        ]
                     }
-                });
-                break;
-                
-            case 'payment_requested':
-                notifications.push({
-                    userId: transaction.buyerId,
-                    message: this.formatPaymentRequestMessage(transaction, additionalData),
-                    options: {
-                        type: 'payment_requested',
-                        reply_markup: this.getPaymentKeyboard(transaction.transactionId)
+                }
+            },
+
+            'payment_requested': {
+                buyerMessage: `💳 **PAGAMENTO RICHIESTO**\n\n` +
+                    `Il venditore ha confermato i KWH erogati.\n` +
+                    `Procedi con il pagamento secondo gli accordi.\n\n` +
+                    `🔍 ID Transazione: \`${transaction.transactionId}\``,
+                buyerOptions: {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '💳 Ho effettuato il pagamento', callback_data: 'payment_completed' }],
+                            [{ text: '❌ Ho problemi', callback_data: 'payment_issues' }]
+                        ]
                     }
-                });
-                break;
-                
-            case 'completed':
-                // Notify both parties
-                notifications.push(
-                    {
-                        userId: transaction.sellerId,
-                        message: this.formatTransactionCompleteMessage(transaction, 'seller'),
-                        options: { type: 'transaction_completed' }
-                    },
-                    {
-                        userId: transaction.buyerId,
-                        message: this.formatTransactionCompleteMessage(transaction, 'buyer'),
-                        options: { type: 'transaction_completed' }
+                }
+            },
+
+            'completed': {
+                buyerMessage: `🎉 **TRANSAZIONE COMPLETATA!**\n\n` +
+                    `Il venditore ha confermato la ricezione del pagamento.\n\n` +
+                    `⭐ Lascia un feedback per aiutare la community!\n\n` +
+                    `🔍 ID Transazione: \`${transaction.transactionId}\``,
+                sellerMessage: `🎉 **TRANSAZIONE COMPLETATA!**\n\n` +
+                    `Hai confermato la ricezione del pagamento.\n\n` +
+                    `⭐ Lascia un feedback per l'acquirente!\n\n` +
+                    `🔍 ID Transazione: \`${transaction.transactionId}\``,
+                buyerOptions: {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '⭐ Valuta il venditore', callback_data: `feedback_tx_${transaction.transactionId}` }]
+                        ]
                     }
-                );
-                break;
-        }
-        
-        return notifications;
-    }
-    
-    // Message formatting methods
-    
-    formatTransactionConfirmedMessage(transaction) {
-        return `✅ **RICHIESTA ACCETTATA!**\n\n` +
-            `Il venditore ha confermato la tua richiesta.\n` +
-            `📅 Data: ${MarkdownEscape.escape(transaction.scheduledDate)}\n` +
-            `📍 Luogo: ${MarkdownEscape.escape(transaction.location)}\n\n` +
-            `Ti notificheremo quando sarà il momento della ricarica.`;
-    }
-    
-    formatBuyerArrivedMessage(transaction, data) {
-        return `📍 **ACQUIRENTE ARRIVATO!**\n\n` +
-            `L'acquirente @${MarkdownEscape.escape(data.buyerUsername || 'utente')} è alla colonnina.\n` +
-            `🏢 Brand: ${MarkdownEscape.escape(transaction.brand)}\n` +
-            `🔌 Connettore: ${MarkdownEscape.escape(transaction.connector)}\n\n` +
-            `È il momento di attivare la ricarica!`;
-    }
-    
-    formatChargingStartedMessage(transaction) {
-        return `⚡ **RICARICA ATTIVATA!**\n\n` +
-            `Il venditore ha attivato la ricarica.\n` +
-            `Controlla che la ricarica sia iniziata correttamente.`;
-    }
-    
-    formatPaymentRequestMessage(transaction, data) {
-        return `💳 **RICHIESTA PAGAMENTO**\n\n` +
-            `⚡ KWH erogati: ${data.kwhAmount}\n` +
-            `💰 Importo totale: €${data.totalAmount}\n\n` +
-            `Procedi con il pagamento secondo gli accordi.`;
-    }
-    
-    formatTransactionCompleteMessage(transaction, role) {
-        const message = `🎉 **TRANSAZIONE COMPLETATA!**\n\n`;
-        
-        if (role === 'seller') {
-            return message + `Hai completato con successo la vendita.\n` +
-                `Riceverai una notifica per lasciare il feedback.`;
-        } else {
-            return message + `La tua ricarica è stata completata.\n` +
-                `Non dimenticare di lasciare un feedback!`;
-        }
-    }
-    
-    formatNewAnnouncementMessage(announcement) {
-        return `🔋 **NUOVA OFFERTA ENERGIA**\n\n` +
-            `📍 Zona: ${MarkdownEscape.escape(announcement.zones)}\n` +
-            `💰 Prezzo: ${announcement.basePrice || announcement.price}€/KWH\n` +
-            `⚡ Tipo: ${MarkdownEscape.escape(announcement.currentType)}\n\n` +
-            `Clicca per vedere i dettagli!`;
-    }
-    
-    formatReminderMessage(type, data) {
-        const messages = {
-            'pending_confirmation': `⏰ **PROMEMORIA**\n\nHai una richiesta in attesa da ${data.hours} ore.\nID: \`${data.transactionId}\``,
-            'payment_pending': `⏰ **PROMEMORIA PAGAMENTO**\n\nRicordati di completare il pagamento per la transazione.\nID: \`${data.transactionId}\``,
-            'announcement_expiring': `⏰ **ANNUNCIO IN SCADENZA**\n\nIl tuo annuncio scadrà tra ${data.hours} ore.\nVuoi estenderlo?`,
-            'feedback_missing': `⏰ **LASCIA UN FEEDBACK**\n\nNon hai ancora valutato la transazione completata.\nID: \`${data.transactionId}\``
+                },
+                sellerOptions: {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '⭐ Valuta l\'acquirente', callback_data: `feedback_tx_${transaction.transactionId}` }]
+                        ]
+                    }
+                }
+            }
         };
-        
-        return messages[type];
+
+        return templates[newStatus] || { buyerMessage: null, sellerMessage: null };
     }
-    
-    // Keyboard generation methods
-    
-    getChargingActivationKeyboard(transactionId) {
-        return {
-            inline_keyboard: [
-                [{ text: '⚡ Attiva ricarica', callback_data: `activate_charging_${transactionId}` }],
-                [{ text: '⏸️ Ritarda 5 min', callback_data: `delay_charging_${transactionId}` }],
-                [{ text: '❌ Problemi tecnici', callback_data: `technical_issues_${transactionId}` }]
-            ]
+
+    /**
+     * Get reminder template
+     */
+    getReminderTemplate(reminderType, data) {
+        const templates = {
+            'pending_confirmation': `⏰ **PROMEMORIA**\n\n` +
+                `Hai una richiesta di acquisto in attesa di conferma da ${data.hours || 2} ore.\n\n` +
+                `🔍 ID Transazione: \`${data.transactionId}\``,
+
+            'payment_pending': `⏰ **PROMEMORIA PAGAMENTO**\n\n` +
+                `Hai un pagamento in sospeso da ${data.hours || 1} ore.\n\n` +
+                `🔍 ID Transazione: \`${data.transactionId}\``,
+
+            'feedback_missing': `⭐ **FEEDBACK MANCANTE**\n\n` +
+                `Non hai ancora lasciato feedback per una transazione completata.\n\n` +
+                `🔍 ID Transazione: \`${data.transactionId}\``,
+
+            'announcement_expiring': `⏰ **ANNUNCIO IN SCADENZA**\n\n` +
+                `Il tuo annuncio scadrà tra ${data.hours || 1} ora.\n\n` +
+                `🔍 ID Annuncio: \`${data.announcementId}\``,
+
+            'charging_scheduled': `⚡ **RICARICA PROGRAMMATA**\n\n` +
+                `La tua ricarica è programmata per ${data.scheduledDate}.\n` +
+                `Ricordati di essere puntuale!\n\n` +
+                `🔍 ID Transazione: \`${data.transactionId}\``
         };
+
+        return templates[reminderType] || null;
     }
-    
-    getChargingConfirmationKeyboard(transactionId) {
-        return {
-            inline_keyboard: [
-                [
-                    { text: '✅ Sta caricando', callback_data: `charging_ok_${transactionId}` },
-                    { text: '❌ Non carica', callback_data: `charging_fail_${transactionId}` }
-                ]
-            ]
+
+    /**
+     * Get announcement template
+     */
+    getAnnouncementTemplate(eventType, announcement, data) {
+        const templates = {
+            'expired': `⏰ **ANNUNCIO SCADUTO**\n\n` +
+                `Il tuo annuncio \`${announcement.announcementId}\` è scaduto e è stato rimosso dal marketplace.\n\n` +
+                `Puoi crearne uno nuovo quando vuoi dal menu principale.`,
+
+            'extended': `✅ **ANNUNCIO ESTESO**\n\n` +
+                `Il tuo annuncio \`${announcement.announcementId}\` è stato esteso per altre 24 ore.\n\n` +
+                `Nuova scadenza: ${data.newExpiry || 'domani alla stessa ora'}.`,
+
+            'request_received': `📥 **NUOVA RICHIESTA**\n\n` +
+                `Hai ricevuto una nuova richiesta di acquisto per il tuo annuncio.\n\n` +
+                `👤 Da: ${data.buyerName || 'Utente'}\n` +
+                `🔍 ID Annuncio: \`${announcement.announcementId}\``
         };
+
+        return templates[eventType] || null;
     }
-    
-    getPaymentKeyboard(transactionId) {
-        return {
-            inline_keyboard: [
-                [{ text: '💳 Ho pagato', callback_data: `payment_done_${transactionId}` }]
-            ]
+
+    /**
+     * Get reminder options based on type
+     */
+    getReminderOptions(reminderType, data) {
+        const optionsMap = {
+            'pending_confirmation': {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '✅ Gestisci richiesta', callback_data: `manage_tx_${data.transactionId}` }]
+                    ]
+                }
+            },
+
+            'payment_pending': {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '💳 Gestisci pagamento', callback_data: 'payment_completed' }]
+                    ]
+                }
+            },
+
+            'feedback_missing': {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '⭐ Lascia feedback', callback_data: `feedback_tx_${data.transactionId}` }]
+                    ]
+                }
+            },
+
+            'announcement_expiring': {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🔄 Estendi annuncio', callback_data: `extend_ann_notify_${data.announcementId}` }]
+                    ]
+                }
+            }
         };
+
+        return optionsMap[reminderType] || {};
     }
-    
-    // Statistics methods
-    
+
+    /**
+     * Get notification statistics
+     */
     getStats() {
         return {
-            ...this.notificationStats,
-            queuedUsers: this.queuedNotifications.size
-        };
-    }
-    
-    resetStats() {
-        this.notificationStats = {
-            sent: 0,
-            failed: 0,
-            queued: 0
+            type: 'NotificationService',
+            templatesAvailable: {
+                transaction: Object.keys(this.getTransactionUpdateTemplate({}, '', {}).templates || {}),
+                reminder: ['pending_confirmation', 'payment_pending', 'feedback_missing', 'announcement_expiring'],
+                announcement: ['expired', 'extended', 'request_received']
+            }
         };
     }
 }
