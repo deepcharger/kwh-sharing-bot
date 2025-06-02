@@ -1,12 +1,23 @@
-// src/utils/helpers/ErrorHandler.js
+// src/utils/helpers/ErrorHandler.js - Gestione centralizzata degli errori
 const logger = require('../logger');
 const { ERROR_TYPES } = require('../../config/constants');
 
 class ErrorHandler {
+    static errorCounts = {};
+    static lastError = null;
+
     /**
      * Handle error uniformly
      */
     static async handle(error, ctx, severity = 'error') {
+        // Store last error
+        this.lastError = {
+            message: error.message,
+            stack: error.stack,
+            timestamp: new Date(),
+            severity
+        };
+
         // Log the error
         this.logError(error, ctx, severity);
         
@@ -53,6 +64,10 @@ class ErrorHandler {
             if (ctx.callbackQuery) {
                 logData.callbackData = ctx.callbackQuery.data;
             }
+            
+            if (ctx.message) {
+                logData.messageText = ctx.message.text?.substring(0, 100);
+            }
         }
         
         switch (severity) {
@@ -91,17 +106,49 @@ class ErrorHandler {
         } else if (error.message?.includes('not found')) {
             details.type = ERROR_TYPES.NOT_FOUND;
             details.message = 'Resource not found';
-        } else if (error.message?.includes('unauthorized')) {
+        } else if (error.message?.includes('unauthorized') || error.message?.includes('Forbidden')) {
             details.type = ERROR_TYPES.UNAUTHORIZED;
             details.message = 'Unauthorized access';
-        } else if (error.code === 'ETELEGRAM') {
+        } else if (error.code === 'ETELEGRAM' || error.response?.error_code) {
             details.type = ERROR_TYPES.NETWORK;
-            details.message = 'Telegram API error';
+            details.message = this.getTelegramErrorMessage(error);
         } else if (error.name === 'MongoError' || error.name === 'MongooseError') {
             details.type = ERROR_TYPES.DATABASE;
+            details.message = 'Database operation failed';
+        } else if (error.code === 'MODULE_NOT_FOUND') {
+            details.type = ERROR_TYPES.SYSTEM;
+            details.message = 'Missing module or file';
+        } else if (error.name === 'TypeError' && error.message?.includes('Cannot read properties')) {
+            details.type = ERROR_TYPES.SYSTEM;
+            details.message = 'Service or method not available';
         }
         
         return details;
+    }
+
+    /**
+     * Get Telegram-specific error message
+     */
+    static getTelegramErrorMessage(error) {
+        const errorCode = error.response?.error_code;
+        const description = error.response?.description;
+        
+        switch (errorCode) {
+            case 400:
+                return 'Invalid request format';
+            case 401:
+                return 'Bot token invalid';
+            case 403:
+                return 'Bot blocked by user or insufficient permissions';
+            case 404:
+                return 'Resource not found';
+            case 429:
+                return 'Too many requests, rate limited';
+            case 500:
+                return 'Telegram server error';
+            default:
+                return description || 'Telegram API error';
+        }
     }
 
     /**
@@ -114,7 +161,14 @@ class ErrorHandler {
             if (ctx.callbackQuery) {
                 await ctx.answerCbQuery(userMessage, { show_alert: true });
             } else if (ctx.reply) {
-                await ctx.reply(userMessage);
+                await ctx.reply(userMessage, {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🏠 Menu principale', callback_data: 'back_to_main' }]
+                        ]
+                    }
+                });
             }
         } catch (notifyError) {
             logger.error('Could not notify user about error:', notifyError);
@@ -129,9 +183,10 @@ class ErrorHandler {
             [ERROR_TYPES.VALIDATION]: '❌ Dati non validi. Controlla e riprova.',
             [ERROR_TYPES.NOT_FOUND]: '❌ Risorsa non trovata.',
             [ERROR_TYPES.UNAUTHORIZED]: '❌ Non sei autorizzato per questa azione.',
-            [ERROR_TYPES.DATABASE]: '❌ Errore database. Riprova tra poco.',
+            [ERROR_TYPES.DATABASE]: '❌ Errore del database. Riprova tra poco.',
             [ERROR_TYPES.NETWORK]: '❌ Errore di connessione. Riprova.',
-            [ERROR_TYPES.UNKNOWN]: '❌ Si è verificato un errore. Riprova.'
+            [ERROR_TYPES.SYSTEM]: '❌ Errore del sistema. Contatta l\'admin se persiste.',
+            [ERROR_TYPES.UNKNOWN]: '❌ Si è verificato un errore imprevisto. Riprova.'
         };
         
         return messages[errorDetails.type] || messages[ERROR_TYPES.UNKNOWN];
@@ -142,36 +197,75 @@ class ErrorHandler {
      */
     static isCritical(errorType, severity) {
         return severity === 'critical' || 
-               [ERROR_TYPES.DATABASE, ERROR_TYPES.UNKNOWN].includes(errorType);
+               [ERROR_TYPES.DATABASE, ERROR_TYPES.SYSTEM].includes(errorType);
     }
 
     /**
      * Notify admin about critical errors
      */
     static async notifyAdmin(error, ctx, errorDetails) {
-        // This should use the bot's notification service
-        // For now, just log it
-        logger.error('CRITICAL ERROR - Admin notification needed:', {
-            error: error.message,
-            stack: error.stack,
-            type: errorDetails.type,
-            user: ctx?.from?.id,
-            timestamp: new Date().toISOString()
-        });
+        try {
+            const adminMessage = this.formatAdminErrorMessage(error, ctx, errorDetails);
+            
+            // This should use the bot's notification service
+            // For now, just log it as a placeholder
+            logger.error('ADMIN NOTIFICATION NEEDED:', adminMessage);
+            
+            // TODO: Integrate with NotificationService when available
+            // await notificationService.notifyAdmin(adminMessage);
+            
+        } catch (notifyError) {
+            logger.error('Could not notify admin about error:', notifyError);
+        }
+    }
+
+    /**
+     * Format admin error message
+     */
+    static formatAdminErrorMessage(error, ctx, errorDetails) {
+        let message = `🚨 **ERRORE CRITICO**\n\n`;
+        message += `**Tipo:** ${errorDetails.type}\n`;
+        message += `**Messaggio:** ${error.message}\n`;
+        
+        if (ctx) {
+            message += `**Utente:** ${ctx.from?.username || 'unknown'} (${ctx.from?.id})\n`;
+            if (ctx.callbackQuery) {
+                message += `**Callback:** ${ctx.callbackQuery.data}\n`;
+            }
+            if (ctx.message?.text) {
+                message += `**Messaggio:** ${ctx.message.text.substring(0, 100)}\n`;
+            }
+        }
+        
+        message += `**Timestamp:** ${new Date().toISOString()}\n`;
+        message += `**Stack:** \`\`\`${error.stack?.substring(0, 500)}\`\`\``;
+        
+        return message;
     }
 
     /**
      * Track error metrics
      */
     static trackError(errorDetails) {
-        // In a real implementation, this would send metrics to a monitoring service
-        // For now, we'll keep an in-memory counter
-        if (!this.errorCounts) {
-            this.errorCounts = {};
-        }
-        
         const key = errorDetails.type;
         this.errorCounts[key] = (this.errorCounts[key] || 0) + 1;
+        
+        // Clean old counts periodically (keep last 24 hours)
+        if (Math.random() < 0.01) { // 1% chance to cleanup
+            this.cleanupOldCounts();
+        }
+    }
+
+    /**
+     * Cleanup old error counts
+     */
+    static cleanupOldCounts() {
+        // Simple cleanup - reset if too many errors
+        const totalErrors = Object.values(this.errorCounts).reduce((sum, count) => sum + count, 0);
+        if (totalErrors > 1000) {
+            this.errorCounts = {};
+            logger.info('Error counts reset due to high volume');
+        }
     }
 
     /**
@@ -179,8 +273,9 @@ class ErrorHandler {
      */
     static getStats() {
         return {
-            counts: this.errorCounts || {},
-            lastError: this.lastError || null
+            counts: { ...this.errorCounts },
+            lastError: this.lastError,
+            totalErrors: Object.values(this.errorCounts).reduce((sum, count) => sum + count, 0)
         };
     }
 
@@ -190,6 +285,7 @@ class ErrorHandler {
     static resetStats() {
         this.errorCounts = {};
         this.lastError = null;
+        logger.info('Error statistics reset');
     }
 
     /**
@@ -216,8 +312,89 @@ class ErrorHandler {
                 if (options.rethrow) {
                     throw error;
                 }
+                
+                // Return default value if specified
+                return options.defaultValue;
             }
         };
+    }
+
+    /**
+     * Create error middleware for bot
+     */
+    static createMiddleware() {
+        return async (ctx, next) => {
+            try {
+                await next();
+            } catch (error) {
+                await this.handle(error, ctx);
+            }
+        };
+    }
+
+    /**
+     * Handle specific error types
+     */
+    static async handleDatabaseError(error, ctx) {
+        return await this.handle(error, ctx, 'critical');
+    }
+
+    static async handleValidationError(error, ctx) {
+        return await this.handle(error, ctx, 'warning');
+    }
+
+    static async handleNetworkError(error, ctx) {
+        return await this.handle(error, ctx, 'error');
+    }
+
+    static async handleUnauthorizedError(error, ctx) {
+        return await this.handle(error, ctx, 'warning');
+    }
+
+    /**
+     * Bulk error analysis
+     */
+    static analyzeErrors() {
+        const stats = this.getStats();
+        const analysis = {
+            totalErrors: stats.totalErrors,
+            mostCommon: null,
+            criticalCount: 0,
+            recommendations: []
+        };
+
+        if (stats.totalErrors === 0) {
+            analysis.recommendations.push('No errors detected - system is stable');
+            return analysis;
+        }
+
+        // Find most common error
+        let maxCount = 0;
+        for (const [type, count] of Object.entries(stats.counts)) {
+            if (count > maxCount) {
+                maxCount = count;
+                analysis.mostCommon = { type, count };
+            }
+            
+            if ([ERROR_TYPES.DATABASE, ERROR_TYPES.SYSTEM].includes(type)) {
+                analysis.criticalCount += count;
+            }
+        }
+
+        // Generate recommendations
+        if (analysis.criticalCount > 10) {
+            analysis.recommendations.push('High number of critical errors - investigate system health');
+        }
+
+        if (stats.counts[ERROR_TYPES.NETWORK] > 20) {
+            analysis.recommendations.push('Network issues detected - check Telegram API status');
+        }
+
+        if (stats.counts[ERROR_TYPES.DATABASE] > 5) {
+            analysis.recommendations.push('Database issues detected - check MongoDB connection');
+        }
+
+        return analysis;
     }
 }
 
