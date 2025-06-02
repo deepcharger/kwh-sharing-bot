@@ -32,6 +32,21 @@ class PaymentKeyboards {
             [Markup.button.callback('❌ Non ricevuto', 'payment_not_received')]
         ]);
     }
+
+    static getPaymentPendingKeyboard(transactionId) {
+        return Markup.inlineKeyboard([
+            [Markup.button.callback('💳 Ho pagato', `payment_done_${transactionId}`)]
+        ]);
+    }
+
+    static getMultiplePaymentsKeyboard(paymentPending) {
+        const buttons = paymentPending.map((tx, index) => [{
+            text: `💰 \`${tx.transactionId.slice(-10)}\` - ${tx.declaredKwh || '?'} KWH`,
+            callback_data: `confirm_payment_${tx.transactionId}`
+        }]);
+        
+        return Markup.inlineKeyboard(buttons);
+    }
 }
 
 module.exports = PaymentKeyboards;
