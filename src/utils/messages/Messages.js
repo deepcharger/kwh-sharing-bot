@@ -1,589 +1,323 @@
-// src/utils/messages/Messages.js - NUOVO FILE
-const MarkdownEscape = require('../MarkdownEscape');
+// src/utils/Messages.js - File di compatibilità completo per import legacy
+const MarkdownEscape = require('./MarkdownEscape');
+const { TRANSACTION_STATUS } = require('../config/constants');
 
-class Messages {
-    // Template messages
-    static templates = {
-        help: {
-            selling: () => `📋 **COME VENDERE KWH**\n\n` +
-                `1️⃣ **Crea annuncio:** Clicca "🔋 Vendi KWH"\n` +
-                `2️⃣ **Inserisci dati:** Prezzo, tipo corrente, zone, reti\n` +
-                `3️⃣ **Pubblico automatico:** L'annuncio appare nel topic\n` +
-                `4️⃣ **Ricevi richieste:** Ti notifichiamo ogni interesse\n` +
-                `5️⃣ **Gestisci transazione:** Attivi ricarica e confermi pagamento\n\n` +
-                `💡 **Suggerimenti:**\n` +
-                `• Prezzo competitivo: 0,30-0,40€/KWH\n` +
-                `• Rispondi velocemente alle richieste\n` +
-                `• Mantieni alta la qualità del servizio`,
-            
-            buying: () => `🛒 **COME COMPRARE KWH**\n\n` +
-                `1️⃣ **Trova annuncio:** Vai nel topic annunci\n` +
-                `2️⃣ **Contatta venditore:** Clicca "Contatta venditore"\n` +
-                `3️⃣ **Fornisci dettagli:** Data, colonnina, connettore\n` +
-                `4️⃣ **Attendi conferma:** Il venditore deve accettare\n` +
-                `5️⃣ **Conferma arrivo:** Quando sei alla colonnina\n` +
-                `6️⃣ **Ricarica:** Segui le istruzioni per l'attivazione\n` +
-                `7️⃣ **Foto display:** Scatta foto dei KWH ricevuti\n` +
-                `8️⃣ **Pagamento:** Paga come concordato\n` +
-                `9️⃣ **Feedback:** Lascia una valutazione\n\n` +
-                `💡 **Suggerimenti:**\n` +
-                `• Verifica sempre i dettagli prima di confermare\n` +
-                `• Scatta foto nitide del display\n` +
-                `• Paga solo dopo conferma del venditore`,
-            
-            feedback: () => `⭐ **SISTEMA FEEDBACK**\n\n` +
-                `🌟 **Come funziona:**\n` +
-                `• Ogni transazione richiede feedback reciproco\n` +
-                `• Scala 1-5 stelle (1=pessimo, 5=ottimo)\n` +
-                `• Feedback <3 stelle richiedono motivazione\n\n` +
-                `🏆 **Badge Venditore:**\n` +
-                `• >90% positivi = VENDITORE AFFIDABILE ✅\n` +
-                `• >95% positivi = VENDITORE TOP 🌟\n\n` +
-                `📊 **Vantaggi feedback alto:**\n` +
-                `• Maggiore visibilità negli annunci\n` +
-                `• Più richieste di acquisto\n` +
-                `• Maggiore fiducia degli acquirenti\n\n` +
-                `⚖️ **Feedback equo:**\n` +
-                `Lascia feedback onesto e costruttivo per aiutare la community.`,
-            
-            faq: () => `❓ **DOMANDE FREQUENTI**\n\n` +
-                `❓ **Come funziona il sistema di pagamento?**\n` +
-                `Il pagamento avviene direttamente tra venditore e acquirente tramite i metodi indicati nell'annuncio.\n\n` +
-                `❓ **Cosa succede se la ricarica non funziona?**\n` +
-                `Il bot offre diverse opzioni: riprovare, cambiare connettore, trovare colonnina alternativa o contattare l'admin.\n\n` +
-                `❓ **Come ottengo i badge venditore?**\n` +
-                `• >90% feedback positivi = VENDITORE AFFIDABILE\n` +
-                `• >95% feedback positivi = VENDITORE TOP\n\n` +
-                `❓ **Posso modificare un annuncio pubblicato?**\n` +
-                `No, ma puoi crearne uno nuovo che sostituirà automaticamente il precedente.\n\n` +
-                `❓ **Il bot supporta tutte le reti di ricarica?**\n` +
-                `Dipende dall'accesso del venditore. Ogni annuncio specifica le reti disponibili.`
-        },
+// Import formatters for compatibility
+const formatters = require('./messages/formatters');
+
+// Messaggi di base
+const WELCOME = `🔋 **Benvenuto in KWH Sharing Bot!**
+
+Il marketplace per la condivisione di energia elettrica.
+
+🛒 **Comprare energia**: Trova offerte vicino a te
+🔋 **Vendere energia**: Pubblica il tuo annuncio
+📊 **Gestire**: Controlla annunci e transazioni
+
+Usa i pulsanti qui sotto per iniziare!`;
+
+const SELL_WELCOME = `🔋 **CREA IL TUO ANNUNCIO**
+
+Iniziamo a creare il tuo annuncio per vendere energia.
+
+I seguenti step ti guideranno attraverso la configurazione:
+• Tipo di corrente supportata
+• Prezzo per KWH
+• Zone servite
+• Reti disponibili
+• Metodi di pagamento
+
+Pronto per iniziare?`;
+
+const HELP_TEXT = `❓ **GUIDA AL BOT**
+
+📝 **Come funziona:**
+1. I venditori pubblicano annunci con prezzo e posizione
+2. Gli acquirenti trovano offerte e fanno richieste
+3. Si accordano su orario e modalità
+4. Completano la transazione con feedback
+
+🔗 **Comandi utili:**
+• \`/menu\` - Torna al menu principale
+• \`/help\` - Mostra questa guida
+• \`/pagamenti\` - Gestisci pagamenti in sospeso
+• \`/feedback_mancanti\` - Lascia feedback mancanti
+
+💡 **Suggerimenti:**
+• Usa i pulsanti per navigare facilmente
+• Controlla sempre i feedback dei venditori
+• Comunica chiaramente orari e posizione`;
+
+const FEEDBACK_REQUEST = `⭐ **VALUTA LA TRANSAZIONE**
+
+Come è andata questa transazione?
+Seleziona una valutazione da 1 a 5 stelle:
+
+1⭐ = Pessima esperienza
+2⭐ = Esperienza negativa  
+3⭐ = Esperienza nella norma
+4⭐ = Buona esperienza
+5⭐ = Esperienza eccellente`;
+
+const NEGATIVE_FEEDBACK_REASON = `📝 **Descrivi il problema**
+
+Hai dato una valutazione bassa. Per favore spiega brevemente cosa è andato storto così possiamo migliorare il servizio:
+
+_Scrivi il motivo del problema..._`;
+
+const CHARGING_FAILED_RETRY = `❌ **RICARICA NON RIUSCITA**
+
+L'acquirente ha segnalato che la ricarica non è partita.
+
+Cosa vuoi fare?`;
+
+// Messaggi per feedback mancanti
+const MISSING_FEEDBACK_HEADER = `⭐ **FEEDBACK MANCANTI**
+
+Hai alcune transazioni completate senza feedback:`;
+
+const NO_MISSING_FEEDBACK = `✅ **NESSUN FEEDBACK MANCANTE**
+
+Hai lasciato feedback per tutte le transazioni completate!
+
+Grazie per contribuire alla community.`;
+
+// Messaggi per pagamenti
+const PAYMENT_RECEIVED_CONFIRM = `✅ **PAGAMENTO CONFERMATO**
+
+Hai confermato la ricezione del pagamento.
+La transazione è ora completata!`;
+
+const PAYMENT_SENT_CONFIRM = `✅ **PAGAMENTO INVIATO**
+
+La tua dichiarazione di pagamento è stata inviata al venditore.
+Attendi la conferma di ricezione.`;
+
+// Messaggi per notifiche
+const TRANSACTION_UPDATE_TITLE = `🔔 **AGGIORNAMENTO TRANSAZIONE**`;
+const REMINDER_TITLE = `⏰ **PROMEMORIA**`;
+const SYSTEM_NOTIFICATION = `🔧 **NOTIFICA DI SISTEMA**`;
+
+// Funzioni di formattazione legacy (per compatibilità)
+function formatPriceExamples(announcement) {
+    if (!announcement) return '';
+    
+    const examples = [10, 30, 50, 100];
+    let result = '\n💰 **Esempi di costo:**\n';
+    
+    for (const kwh of examples) {
+        let cost = 0;
         
-        navigation: {
-            buyEnergyInfo: () => `🛒 **ACQUISTA ENERGIA**\n\n` +
-                `Trova le migliori offerte di ricarica nella tua zona!\n\n` +
-                `💡 Ogni annuncio mostra:\n` +
-                `• Prezzo per KWH\n` +
-                `• Zone servite\n` +
-                `• Reti disponibili\n` +
-                `• Valutazioni del venditore\n\n` +
-                `Clicca sul bottone per vedere le offerte disponibili.`
-        },
-        
-        transaction: {
-            requestAccepted: (transaction) => {
-                let message = `✅ **RICHIESTA ACCETTATA!**\n\n` +
-                    `Il venditore ha confermato la tua richiesta per ${MarkdownEscape.escape(transaction.scheduledDate)}.\n\n`;
-                
-                if (transaction.locationCoords && transaction.locationCoords.latitude && transaction.locationCoords.longitude) {
-                    const lat = transaction.locationCoords.latitude;
-                    const lng = transaction.locationCoords.longitude;
-                    message += `📍 **Posizione:** [Apri in Google Maps](https://www.google.com/maps?q=${lat},${lng})\n`;
-                    message += `🧭 Coordinate: \`${lat}, ${lng}\`\n`;
-                } else if (transaction.location) {
-                    message += `📍 **Posizione:** \`${transaction.location}\`\n`;
+        if (announcement.pricingType === 'fixed') {
+            const price = announcement.basePrice || announcement.price || 0;
+            cost = kwh * price;
+        } else if (announcement.pricingType === 'graduated' && announcement.pricingTiers) {
+            // Find applicable tier
+            let applicableTier = announcement.pricingTiers[announcement.pricingTiers.length - 1];
+            for (let tier of announcement.pricingTiers) {
+                if (tier.limit === null || kwh <= tier.limit) {
+                    applicableTier = tier;
+                    break;
                 }
-                
-                message += `🏢 **Brand:** ${MarkdownEscape.escape(transaction.brand)}\n` +
-                    `🔌 **Connettore:** ${MarkdownEscape.escape(transaction.connector)}\n\n` +
-                    `⚠️ **IMPORTANTE:** Quando arrivi alla colonnina e sei pronto per ricaricare, premi il bottone sotto per avvisare il venditore.\n\n` +
-                    `🔍 ID Transazione: \`${transaction.transactionId}\``;
-                
-                return message;
-            },
-            
-            requestRejected: (reason) => 
-                `❌ **Richiesta rifiutata**\n\nMotivo: ${MarkdownEscape.escape(reason)}`,
-            
-            buyerArrivedConfirm: (transaction) => {
-                let confirmMessage = `✅ **CONFERMATO!**\n\n` +
-                    `Il venditore è stato avvisato che sei arrivato alla colonnina.\n\n`;
-                
-                if (transaction.locationCoords && transaction.locationCoords.latitude && transaction.locationCoords.longitude) {
-                    const lat = transaction.locationCoords.latitude;
-                    const lng = transaction.locationCoords.longitude;
-                    confirmMessage += `📍 **Posizione:** [Apri in Google Maps](https://www.google.com/maps?q=${lat},${lng})\n`;
-                    confirmMessage += `🧭 Coordinate: \`${lat}, ${lng}\`\n\n`;
-                } else if (transaction.location) {
-                    confirmMessage += `📍 **Posizione:** \`${transaction.location}\`\n\n`;
-                }
-                
-                confirmMessage += `⏳ Attendi che il venditore attivi la ricarica.\n\n` +
-                    `💡 **Suggerimenti:**\n` +
-                    `• Verifica che il connettore sia quello giusto\n` +
-                    `• Assicurati che l'auto sia pronta per ricevere la ricarica\n` +
-                    `• Tieni il cavo a portata di mano\n\n` +
-                    `🔍 ID Transazione: \`${transaction.transactionId}\``;
-                
-                return confirmMessage;
-            },
-            
-            contactBuyer: (buyerUsername, buyerId, telegramLink) => {
-                let message = `💬 **Contatta l'acquirente**\n\n`;
-                
-                if (buyerUsername !== 'user') {
-                    message += `Puoi contattare direttamente @${MarkdownEscape.escape(buyerUsername)} cliccando qui:\n` +
-                        `${telegramLink}\n\n` +
-                        `📝 **Suggerimenti per la conversazione:**\n` +
-                        `• Conferma i dettagli della ricarica\n` +
-                        `• Chiarisci eventuali dubbi sulla colonnina\n` +
-                        `• Coordina l'orario se necessario\n` +
-                        `• Discuti il metodo di pagamento preferito\n\n` +
-                        `⚠️ **Importante:** Dopo aver chiarito tutti i dettagli, torna qui per accettare o rifiutare la richiesta.`;
-                } else {
-                    message += `L'utente non ha un username pubblico.\n` +
-                        `ID Utente: \`${buyerId}\`\n\n` +
-                        `Puoi provare a contattarlo tramite il link:\n${telegramLink}\n\n` +
-                        `Oppure attendi che ti contatti lui.`;
-                }
-                
-                return message;
-            },
-            
-            details: (transaction, role, statusText, statusEmoji, announcement) => {
-                let detailText = MarkdownEscape.formatTransactionDetails(transaction, role, statusText, statusEmoji);
-                
-                if (announcement) {
-                    detailText += `💰 Prezzo: ${announcement.price || announcement.basePrice}€/KWH\n`;
-                }
-                
-                if (transaction.locationCoords && transaction.locationCoords.latitude && transaction.locationCoords.longitude) {
-                    const lat = transaction.locationCoords.latitude;
-                    const lng = transaction.locationCoords.longitude;
-                    detailText += `\n📍 **Posizione:** [Apri in Google Maps](https://www.google.com/maps?q=${lat},${lng})\n`;
-                    detailText += `🧭 Coordinate: \`${lat}, ${lng}\`\n`;
-                } else if (transaction.location) {
-                    detailText += `\n📍 Posizione: \`${transaction.location}\`\n`;
-                }
-                
-                return detailText;
-            },
-            
-            kwhDispute: (reason) => 
-                `⚠️ **Problema con i KWH dichiarati**\n\n` +
-                `Il venditore segnala: ${MarkdownEscape.escape(reason)}\n\n` +
-                `Controlla nuovamente la foto e rispondi al venditore.`,
-            
-            fullDetails: async (transaction, announcement, isSeller, getStatusText) => {
-                const role = isSeller ? 'VENDITORE' : 'ACQUIRENTE';
-                
-                let detailText = `📋 **DETTAGLI TRANSAZIONE**\n\n`;
-                detailText += `🆔 ID: \`${transaction.transactionId}\`\n`;
-                detailText += `📊 Stato: ${getStatusText(transaction.status)}\n`;
-                detailText += `👤 Ruolo: ${role}\n\n`;
-                
-                detailText += `📅 Data creazione: ${transaction.createdAt.toLocaleDateString('it-IT')}\n`;
-                if (transaction.completedAt) {
-                    detailText += `✅ Completata il: ${transaction.completedAt.toLocaleDateString('it-IT')} alle ${transaction.completedAt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}\n`;
-                }
-                
-                if (transaction.locationCoords && transaction.locationCoords.latitude && transaction.locationCoords.longitude) {
-                    const lat = transaction.locationCoords.latitude;
-                    const lng = transaction.locationCoords.longitude;
-                    detailText += `\n📍 **Posizione:** [Apri in Google Maps](https://www.google.com/maps?q=${lat},${lng})\n`;
-                    detailText += `🧭 Coordinate: \`${lat}, ${lng}\`\n`;
-                } else if (transaction.location) {
-                    detailText += `\n📍 Luogo: ${MarkdownEscape.escape(transaction.location)}\n`;
-                }
-                
-                detailText += `🏢 Brand: ${MarkdownEscape.escape(transaction.brand)}\n`;
-                detailText += `🔌 Connettore: ${MarkdownEscape.escape(transaction.connector)}\n`;
-                
-                if (transaction.declaredKwh || transaction.actualKwh) {
-                    detailText += `\n⚡ **Energia:**\n`;
-                    if (transaction.actualKwh && transaction.actualKwh !== transaction.declaredKwh) {
-                        detailText += `• Ricaricati: ${transaction.actualKwh} KWH\n`;
-                        detailText += `• Fatturati: ${transaction.declaredKwh} KWH (minimo applicato)\n`;
-                    } else {
-                        detailText += `• KWH: ${transaction.declaredKwh || transaction.actualKwh}\n`;
-                    }
-                }
-                
-                if (announcement && transaction.declaredKwh) {
-                    const price = announcement.price || announcement.basePrice;
-                    const amount = (transaction.declaredKwh * price).toFixed(2);
-                    detailText += `\n💰 **Pagamento:**\n`;
-                    detailText += `• Prezzo: ${price}€/KWH\n`;
-                    detailText += `• Totale: €${amount}\n`;
-                }
-                
-                return detailText;
-            },
-            
-            pendingList: (pending, getStatusEmoji, getStatusText) => {
-                return MarkdownEscape.formatTransactionList(pending, getStatusEmoji, getStatusText);
-            },
-            
-            historySection: (title, transactions, userId, cacheFunction) => {
-                let message = `✅ **${title} (${transactions.length}):**\n\n`;
-                
-                transactions.forEach((tx, index) => {
-                    const date = tx.completedAt ? tx.completedAt.toLocaleDateString('it-IT') : tx.createdAt.toLocaleDateString('it-IT');
-                    const time = tx.completedAt ? tx.completedAt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '';
-                    
-                    const kwh = tx.declaredKwh || tx.actualKwh || '?';
-                    const role = tx.sellerId === userId ? '📤' : '📥';
-                    
-                    const shortId = tx.transactionId.slice(-10);
-                    cacheFunction(shortId, tx.transactionId);
-                });
-                
-                if (transactions.length > 10) {
-                    message += `\n_...e altre ${transactions.length - 10} transazioni completate_\n`;
-                }
-                
-                return message;
-            },
-            
-            cancelledSection: (transactions, cacheFunction) => {
-                let message = `\n❌ **ANNULLATE (${transactions.length}):**\n\n`;
-                
-                transactions.forEach((tx, index) => {
-                    const date = tx.createdAt.toLocaleDateString('it-IT');
-                    const reason = tx.cancellationReason ? ' - ' + tx.cancellationReason.substring(0, 20) : '';
-                    
-                    const shortId = tx.transactionId.slice(-10);
-                    cacheFunction(shortId, tx.transactionId);
-                });
-                
-                if (transactions.length > 5) {
-                    message += `\n_...e altre ${transactions.length - 5} transazioni annullate_\n`;
-                }
-                
-                return message;
             }
-        },
-        
-        charging: {
-            chargingStarted: (transactionId) => 
-                `⚡ **RICARICA ATTIVATA!**\n\n` +
-                `Il venditore ha attivato la ricarica.\n` +
-                `Controlla il connettore e conferma se la ricarica è iniziata.\n\n` +
-                `💡 **Se non sta caricando:**\n` +
-                `• Verifica che il cavo sia inserito bene\n` +
-                `• Controlla che l'auto sia pronta\n` +
-                `• Riprova l'attivazione\n\n` +
-                `ID Transazione: \`${transactionId}\``,
-            
-            delayReminder: (transactionId) => 
-                `⏰ **PROMEMORIA**\n\nÈ il momento di attivare la ricarica!\n\nID Transazione: \`${transactionId}\``,
-            
-            technicalIssues: () => 
-                `⚠️ **PROBLEMI TECNICI**\n\n` +
-                `Il venditore segnala problemi tecnici con l'attivazione della ricarica.\n\n` +
-                `Attendere ulteriori comunicazioni o contattare il venditore direttamente.`,
-            
-            chargingConfirmedBySeller: (buyer, transactionId) => 
-                `✅ **RICARICA CONFERMATA!**\n\n` +
-                `L'acquirente @${MarkdownEscape.escape(buyer.username || buyer.first_name)} ha confermato che la ricarica è in corso.\n\n` +
-                `⚡ La ricarica sta procedendo correttamente.\n` +
-                `⏳ Attendi che l'acquirente completi la ricarica e invii la foto del display.\n\n` +
-                `🔍 ID Transazione: \`${transactionId}\``,
-            
-            chargingInProgressBuyer: (transactionId) => 
-                `✅ **RICARICA IN CORSO!**\n\n` +
-                `Perfetto! La ricarica sta procedendo.\n\n` +
-                `Quando hai terminato, usa il bot per inviare la foto del display con i KWH erogati.\n\n` +
-                `💡 **Prossimi passi:**\n` +
-                `1. Completa la ricarica\n` +
-                `2. Scatta foto del display\n` +
-                `3. Invia tramite "Gestisci transazione"`,
-            
-            chargingFailedNotify: (transaction, transactionId) => 
-                `❌ **PROBLEMA RICARICA**\n\n` +
-                `L'acquirente segnala che la ricarica non è partita.\n\n` +
-                `🔌 Connettore: ${MarkdownEscape.escape(transaction.connector)}\n` +
-                `📍 Colonnina: ${MarkdownEscape.escape(transaction.brand)}\n` +
-                `🔍 ID Transazione: \`${transactionId}\`\n\n` +
-                `Riprova l'attivazione o verifica il problema.`,
-            
-            retryAttempt: (transactionId) => 
-                `⚡ **NUOVO TENTATIVO DI ATTIVAZIONE**\n\n` +
-                `Il venditore sta riprovando ad attivare la ricarica.\n` +
-                `Controlla se ora funziona.\n\n` +
-                `ID: \`${transactionId}\``,
-            
-            sendDisplayPhoto: () => 
-                `📸 **INVIA FOTO DEL DISPLAY**\n\n` +
-                `Scatta una foto chiara del display che mostri i KWH erogati.\n\n` +
-                `📱 Suggerimenti per la foto:\n` +
-                `• Inquadra bene il display\n` +
-                `• Assicurati che i numeri siano leggibili\n` +
-                `• Evita riflessi sullo schermo`,
-            
-            kwhConfirmed: (transaction, announcement, amount) => {
-                let buyerMessage = `✅ **KWH CONFERMATI DAL VENDITORE**\n\n`;
-                
-                if (transaction.actualKwh && transaction.actualKwh < transaction.declaredKwh) {
-                    buyerMessage += `⚠️ **ATTENZIONE:** Hai ricaricato ${transaction.actualKwh} KWH ma pagherai per il minimo garantito di ${transaction.declaredKwh} KWH come da condizioni dell'annuncio.\n\n`;
-                } else {
-                    buyerMessage += `Il venditore ha confermato la ricezione di ${transaction.declaredKwh} KWH.\n\n`;
-                }
-                
-                if (transaction.pricePerKwh) {
-                    buyerMessage += `💰 **Dettagli pagamento:**\n`;
-                    buyerMessage += `• Prezzo unitario: ${transaction.pricePerKwh}€/KWH\n`;
-                    
-                    if (announcement?.pricingType === 'graduated' && transaction.appliedTier) {
-                        buyerMessage += `• Fascia applicata: `;
-                        if (transaction.appliedTier.limit) {
-                            buyerMessage += `fino a ${transaction.appliedTier.limit} KWH\n`;
-                        } else {
-                            buyerMessage += `oltre ${announcement.pricingTiers[announcement.pricingTiers.length - 2].limit} KWH\n`;
-                        }
-                    }
-                    
-                    buyerMessage += `• **Totale da pagare: €${amount}**\n\n`;
-                } else {
-                    buyerMessage += `💰 **Importo totale: €${amount}**\n\n`;
-                }
-                
-                buyerMessage += `💳 **Procedi con il pagamento**\n` +
-                    `Metodi accettati: ${MarkdownEscape.escape(announcement?.paymentMethods || 'Come concordato')}\n\n` +
-                    `Una volta effettuato il pagamento, premi il pulsante qui sotto.\n\n` +
-                    `🔍 ID Transazione: \`${transaction.transactionId}\``;
-                
-                return buyerMessage;
-            }
-        },
-        
-        payment: {
-            paymentDeclared: (buyer, transaction, amount) => 
-                `💳 **PAGAMENTO DICHIARATO**\n\n` +
-                `L'acquirente @${MarkdownEscape.escape(buyer.username || buyer.first_name)} dichiara di aver pagato.\n\n` +
-                `💰 Importo dichiarato: €${amount}\n` +
-                `⚡ KWH forniti: ${transaction.declaredKwh || 'N/A'}\n` +
-                `🔍 ID Transazione: \`${transaction.transactionId}\`\n\n` +
-                `Hai ricevuto il pagamento?`,
-            
-            paymentDeclaredConfirm: () => 
-                `✅ **DICHIARAZIONE PAGAMENTO INVIATA!**\n\n` +
-                `Il venditore è stato notificato e dovrà confermare la ricezione del pagamento.\n\n` +
-                `Riceverai aggiornamenti sullo stato della transazione.`,
-            
-            paymentInProgress: () => 
-                `⏰ **PAGAMENTO IN CORSO**\n\n` +
-                `Hai indicato che stai ancora effettuando il pagamento.\n\n` +
-                `Una volta completato, torna qui e premi "Ho effettuato il pagamento".`,
-            
-            paymentNotReceived: () => 
-                `⚠️ **PROBLEMA PAGAMENTO**\n\n` +
-                `Il venditore segnala di non aver ricevuto il pagamento.\n\n` +
-                `Controlla il metodo di pagamento e riprova, oppure contatta il venditore direttamente.`,
-            
-            retryPayment: () => 
-                `💳 **Riprova il pagamento**\n\n` +
-                `Effettua nuovamente il pagamento secondo gli accordi presi con il venditore.\n\n` +
-                `Una volta completato, usa il pulsante per confermare.`,
-            
-            sendProof: () => 
-                `📷 **Invia screenshot del pagamento**\n\n` +
-                `Scatta uno screenshot che mostri chiaramente:\n` +
-                `• Importo inviato\n` +
-                `• Data/ora transazione\n` +
-                `• Destinatario\n\n` +
-                `Invia la foto ora:`,
-            
-            proceedWithPayment: (transaction, amount, announcement) => 
-                `💳 **PROCEDI CON IL PAGAMENTO**\n\n` +
-                `🆔 Transazione: \`${transaction.transactionId}\`\n` +
-                `⚡ KWH confermati: ${transaction.declaredKwh || 'N/A'}\n` +
-                `💰 Importo: €${amount}\n` +
-                `💳 Metodi accettati: ${MarkdownEscape.escape(announcement?.paymentMethods || 'Come concordato')}\n\n` +
-                `Effettua il pagamento secondo i metodi concordati, poi conferma.`,
-            
-            paymentDeclaration: (buyer, transaction, amount) => 
-                `💳 **DICHIARAZIONE PAGAMENTO**\n\n` +
-                `L'acquirente @${MarkdownEscape.escape(buyer.username || buyer.first_name)} dichiara di aver pagato.\n\n` +
-                `💰 Importo dichiarato: €${amount}\n` +
-                `⚡ KWH forniti: ${transaction.declaredKwh || 'N/A'}\n` +
-                `💰 Prezzo unitario: ${transaction.pricePerKwh || 'N/A'}€/KWH\n` +
-                `🔍 ID Transazione: \`${transaction.transactionId}\`\n\n` +
-                `Hai ricevuto il pagamento?`,
-            
-            paymentSentConfirm: (transactionId, transaction, amount) => 
-                `✅ **DICHIARAZIONE PAGAMENTO INVIATA!**\n\n` +
-                `🆔 Transazione: \`${transactionId}\`\n` +
-                `⚡ KWH: ${transaction.declaredKwh}\n` +
-                `💰 Importo: €${amount}\n\n` +
-                `Il venditore riceverà una notifica e dovrà confermare la ricezione del pagamento.\n\n` +
-                `Riceverai aggiornamenti sullo stato della transazione.`,
-            
-            proofCaption: (buyer, transactionId) => 
-                `📷 **PROVA PAGAMENTO**\n\n` +
-                `Da: @${MarkdownEscape.escape(buyer.username || buyer.first_name)}\n` +
-                `Transazione: \`${transactionId}\``
-        },
-        
-        feedback: {
-            requestFeedback: (transaction, role) => {
-                const message = `🎉 **TRANSAZIONE COMPLETATA!**\n\n`;
-                
-                if (role === 'buyer') {
-                    return message + 
-                        `Il venditore ha confermato la ricezione del pagamento.\n\n` +
-                        `⭐ **Lascia un feedback**\n` +
-                        `La tua valutazione aiuta la community a crescere.\n\n` +
-                        `🔍 ID Transazione: \`${transaction.transactionId}\``;
-                } else {
-                    return message + 
-                        `Hai confermato la ricezione del pagamento.\n\n` +
-                        `⭐ **Lascia un feedback**\n` +
-                        `Valuta l'acquirente per aiutare la community.\n\n` +
-                        `🔍 ID Transazione: \`${transaction.transactionId}\``;
-                }
-            },
-            
-            noMissingFeedback: () => 
-                `✅ **NESSUN FEEDBACK MANCANTE**\n\n` +
-                `Hai lasciato feedback per tutte le transazioni completate!\n\n` +
-                `Grazie per contribuire alla community.`,
-            
-            missingList: (missingFeedback, userId) => {
-                let message = `⭐ **FEEDBACK MANCANTI**\n\n`;
-                message += `Hai ${missingFeedback.length} transazioni senza feedback:\n\n`;
-                
-                missingFeedback.slice(0, 5).forEach((tx, index) => {
-                    const role = tx.sellerId === userId ? '📤 Vendita' : '📥 Acquisto';
-                    const date = tx.completedAt || tx.createdAt;
-                    const kwh = tx.declaredKwh || tx.actualKwh || '?';
-                    
-                    message += `${index + 1}. ${role} del ${date.toLocaleDateString('it-IT')} - ${kwh} KWH\n`;
-                });
-                
-                if (missingFeedback.length > 5) {
-                    message += `\n... e altre ${missingFeedback.length - 5} transazioni`;
-                }
-                
-                return message;
-            }
-        },
-        
-        announcement: {
-            userList: (announcements, announcementService) => {
-                let message = '📊 **I TUOI ANNUNCI ATTIVI:**\n\n';
-                
-                for (const ann of announcements) {
-                    message += MarkdownEscape.formatAnnouncement(ann);
-                    message += `📅 Pubblicato: ${ann.createdAt.toLocaleDateString('it-IT')}\n`;
-                    
-                    if (announcementService.needsGroupRefresh && announcementService.needsGroupRefresh(ann)) {
-                        message += '🔄 *Timer da aggiornare*\n';
-                    }
-                    
-                    message += '\n';
-                }
-                
-                return message;
-            },
-            
-            buttonText: (ann) => {
-                let buttonText = `📍 ${ann.location ? ann.location.substring(0, 20) : ann.zones.substring(0, 20)}`;
-                if ((ann.location || ann.zones).length > 20) buttonText += '...';
-                
-                if (ann.pricingType === 'fixed') {
-                    buttonText += ` - ${ann.basePrice || ann.price}€/KWH`;
-                } else if (ann.pricingTiers && ann.pricingTiers.length > 0) {
-                    buttonText += ` - da ${ann.pricingTiers[0].price}€`;
-                }
-                
-                return buttonText;
-            },
-            
-            extensionSuccess: (announcement) => 
-                `✅ **ANNUNCIO ESTESO!**\n\n` +
-                `Il tuo annuncio \`${announcement.announcementId}\` è stato esteso per altre 24 ore.\n\n` +
-                `Nuova scadenza: domani alla stessa ora.`,
-            
-            extensionSuccessWithInstructions: () => 
-                `✅ **ANNUNCIO ESTESO!**\n\n` +
-                `Il tuo annuncio è stato esteso per altre 24 ore.\n\n` +
-                `💡 Per aggiornare il timer nel gruppo:\n` +
-                `1. Vai in "📊 I miei annunci"\n` +
-                `2. Seleziona questo annuncio\n` +
-                `3. Clicca "🔄 Aggiorna timer" se disponibile`,
-            
-            statistics: (announcement, annTransactions) => {
-                let statsText = `📊 **STATISTICHE ANNUNCIO**\n\n`;
-                statsText += `🆔 ID: \`${announcement.announcementId}\`\n\n`;
-                statsText += `📈 **Transazioni:**\n`;
-                statsText += `• Totali: ${annTransactions.length}\n`;
-                statsText += `• Completate: ${annTransactions.filter(t => t.status === 'completed').length}\n`;
-                statsText += `• In corso: ${annTransactions.filter(t => !['completed', 'cancelled'].includes(t.status)).length}\n`;
-                statsText += `• Annullate: ${annTransactions.filter(t => t.status === 'cancelled').length}\n\n`;
-                
-                const completedTx = annTransactions.filter(t => t.status === 'completed');
-                if (completedTx.length > 0) {
-                    const totalKwh = completedTx.reduce((sum, t) => sum + (t.actualKwh || 0), 0);
-                    statsText += `⚡ **KWH venduti:** ${totalKwh.toFixed(1)}\n`;
-                }
-                
-                return statsText;
-            }
-        },
-        
-        admin: {
-            generalStats: (stats, announcementStats) => {
-                let statsText = '📊 **STATISTICHE DETTAGLIATE**\n\n';
-                
-                if (stats && stats.overall) {
-                    statsText += `🔄 **Transazioni:**\n`;
-                    statsText += `• Totali: ${stats.overall.totalTransactions || 0}\n`;
-                    statsText += `• Completate: ${stats.overall.completedTransactions || 0}\n`;
-                    statsText += `• Tasso successo: ${stats.overall.totalTransactions > 0 ? 
-                        ((stats.overall.completedTransactions / stats.overall.totalTransactions) * 100).toFixed(1) : 0}%\n`;
-                    statsText += `• KWH totali: ${(stats.overall.totalKwh || 0).toFixed(1)}\n\n`;
-                }
-                
-                if (announcementStats) {
-                    statsText += `📋 **Annunci:**\n`;
-                    statsText += `• Attivi: ${announcementStats.totalActive || 0}\n`;
-                    statsText += `• Prezzo medio: €${(announcementStats.avgPrice || 0).toFixed(3)}/KWH\n`;
-                    statsText += `• Range prezzi: €${(announcementStats.minPrice || 0).toFixed(2)} - €${(announcementStats.maxPrice || 0).toFixed(2)}\n`;
-                }
-                
-                return statsText;
-            }
+            cost = kwh * (applicableTier?.price || 0);
         }
-    };
-    
-    // Re-export original Messages properties for compatibility
-    static get WELCOME() {
-        return require('../Messages').WELCOME;
+        
+        result += `• ${kwh} KWH → €${cost.toFixed(2)}\n`;
     }
     
-    static get SELL_WELCOME() {
-        return require('../Messages').SELL_WELCOME;
-    }
-    
-    static get HELP_TEXT() {
-        return require('../Messages').HELP_TEXT;
-    }
-    
-    static get FEEDBACK_REQUEST() {
-        return require('../Messages').FEEDBACK_REQUEST;
-    }
-    
-    static get NEGATIVE_FEEDBACK_REASON() {
-        return require('../Messages').NEGATIVE_FEEDBACK_REASON;
-    }
-    
-    static formatPriceExamples(announcement) {
-        return require('../Messages').formatPriceExamples(announcement);
-    }
-    
-    static formatUserStats(userStats) {
-        return require('../Messages').formatUserStats(userStats);
-    }
-    
-    static getStatusText(status) {
-        return require('../Messages').getStatusText(status);
-    }
-    
-    static getStatusEmoji(status) {
-        return require('../Messages').getStatusEmoji(status);
-    }
+    return result;
 }
 
-module.exports = Messages;
+function formatUserStats(userStats) {
+    if (!userStats) return 'Statistiche non disponibili.';
+    
+    // Usa il nuovo formatter se disponibile
+    if (formatters && formatters.admin && formatters.admin.userStats) {
+        return formatters.admin.userStats(userStats);
+    }
+    
+    // Fallback alla versione legacy
+    let message = `📊 **LE TUE STATISTICHE**\n\n`;
+    
+    // Transazioni
+    message += `🔄 **Transazioni:**\n`;
+    message += `• Come venditore: ${userStats.sellerTransactions || 0}\n`;
+    message += `• Come acquirente: ${userStats.buyerTransactions || 0}\n`;
+    message += `• Totali: ${(userStats.sellerTransactions || 0) + (userStats.buyerTransactions || 0)}\n\n`;
+    
+    // KWH
+    if (userStats.totalKwhSold || userStats.totalKwhBought) {
+        message += `⚡ **Energia:**\n`;
+        if (userStats.totalKwhSold) {
+            message += `• KWH venduti: ${userStats.totalKwhSold.toFixed(1)}\n`;
+        }
+        if (userStats.totalKwhBought) {
+            message += `• KWH acquistati: ${userStats.totalKwhBought.toFixed(1)}\n`;
+        }
+        message += '\n';
+    }
+    
+    // Feedback
+    if (userStats.totalFeedback > 0) {
+        message += `⭐ **Feedback:**\n`;
+        message += `• Totali ricevuti: ${userStats.totalFeedback}\n`;
+        message += `• Valutazione media: ${userStats.averageRating.toFixed(1)}/5\n`;
+        message += `• Feedback positivi: ${userStats.positivePercentage}%\n`;
+        
+        // Badge
+        if (userStats.sellerBadge) {
+            const badgeEmoji = userStats.sellerBadge === 'TOP' ? '🌟' : '✅';
+            message += `• Badge: ${badgeEmoji} VENDITORE ${userStats.sellerBadge}\n`;
+        }
+        message += '\n';
+    }
+    
+    // Data iscrizione
+    if (userStats.memberSince) {
+        message += `📅 **Membro dal:** ${userStats.memberSince.toLocaleDateString('it-IT')}`;
+    }
+    
+    return message;
+}
+
+function getStatusText(status) {
+    const statusTexts = {
+        [TRANSACTION_STATUS.PENDING_SELLER]: 'In attesa di conferma venditore',
+        [TRANSACTION_STATUS.CONFIRMED]: 'Confermata',
+        [TRANSACTION_STATUS.BUYER_ARRIVED]: 'Acquirente arrivato',
+        [TRANSACTION_STATUS.CHARGING_STARTED]: 'Ricarica avviata',
+        [TRANSACTION_STATUS.CHARGING_IN_PROGRESS]: 'In ricarica',
+        [TRANSACTION_STATUS.CHARGING_COMPLETED]: 'Ricarica completata',
+        [TRANSACTION_STATUS.PHOTO_UPLOADED]: 'Foto caricata',
+        [TRANSACTION_STATUS.KWH_DECLARED]: 'KWH dichiarati',
+        [TRANSACTION_STATUS.PAYMENT_REQUESTED]: 'Pagamento richiesto',
+        [TRANSACTION_STATUS.PAYMENT_DECLARED]: 'Pagamento dichiarato',
+        [TRANSACTION_STATUS.COMPLETED]: 'Completata',
+        [TRANSACTION_STATUS.CANCELLED]: 'Annullata',
+        [TRANSACTION_STATUS.DISPUTED]: 'In disputa'
+    };
+    return statusTexts[status] || status;
+}
+
+function getStatusEmoji(status) {
+    const statusEmojis = {
+        [TRANSACTION_STATUS.PENDING_SELLER]: '⏳',
+        [TRANSACTION_STATUS.CONFIRMED]: '✅',
+        [TRANSACTION_STATUS.BUYER_ARRIVED]: '📍',
+        [TRANSACTION_STATUS.CHARGING_STARTED]: '⚡',
+        [TRANSACTION_STATUS.CHARGING_IN_PROGRESS]: '🔋',
+        [TRANSACTION_STATUS.CHARGING_COMPLETED]: '🏁',
+        [TRANSACTION_STATUS.PHOTO_UPLOADED]: '📷',
+        [TRANSACTION_STATUS.KWH_DECLARED]: '📊',
+        [TRANSACTION_STATUS.PAYMENT_REQUESTED]: '💳',
+        [TRANSACTION_STATUS.PAYMENT_DECLARED]: '💰',
+        [TRANSACTION_STATUS.COMPLETED]: '✅',
+        [TRANSACTION_STATUS.CANCELLED]: '❌',
+        [TRANSACTION_STATUS.DISPUTED]: '⚠️'
+    };
+    return statusEmojis[status] || '❓';
+}
+
+// Funzioni di formattazione avanzate
+function formatTransactionSummary(transaction) {
+    const status = getStatusText(transaction.status);
+    const emoji = getStatusEmoji(transaction.status);
+    const date = transaction.createdAt.toLocaleDateString('it-IT');
+    
+    return `${emoji} **${status}**\n📅 ${date}\n🆔 \`${transaction.transactionId}\``;
+}
+
+function formatAnnouncementSummary(announcement) {
+    const price = announcement.price || announcement.basePrice || 0;
+    const location = announcement.location || announcement.zones || 'Non specificata';
+    const date = announcement.createdAt.toLocaleDateString('it-IT');
+    
+    return `💰 **${price.toFixed(3)}€/KWH**\n📍 ${MarkdownEscape.escape(location.substring(0, 30))}\n📅 ${date}`;
+}
+
+function formatNotificationMessage(type, title, content, options = {}) {
+    let message = '';
+    
+    switch (type) {
+        case 'transaction':
+            message = `${TRANSACTION_UPDATE_TITLE}\n\n${content}`;
+            break;
+        case 'reminder':
+            message = `${REMINDER_TITLE}\n\n${content}`;
+            break;
+        case 'system':
+            message = `${SYSTEM_NOTIFICATION}\n\n${content}`;
+            break;
+        default:
+            message = content;
+    }
+    
+    if (options.timestamp) {
+        message += `\n\n🕐 ${new Date().toLocaleString('it-IT')}`;
+    }
+    
+    return message;
+}
+
+// Templates object per compatibilità
+const templates = {
+    feedback: {
+        noMissingFeedback: () => NO_MISSING_FEEDBACK
+    },
+    
+    payment: {
+        pendingList: formatters.payment ? formatters.payment.pendingList : async () => 'Formatters non disponibili'
+    },
+    
+    transaction: {
+        summary: formatTransactionSummary,
+        listHeader: formatters.transaction ? formatters.transaction.listHeader : () => 'Header non disponibile',
+        details: formatters.transaction ? formatters.transaction.details : () => 'Dettagli non disponibili'
+    },
+    
+    announcement: {
+        summary: formatAnnouncementSummary,
+        userList: formatters.announcement ? formatters.announcement.userList : () => 'Lista non disponibile'
+    },
+    
+    notification: {
+        format: formatNotificationMessage
+    }
+};
+
+// Export tutto per compatibilità completa
+module.exports = {
+    // Messaggi base
+    WELCOME,
+    SELL_WELCOME,
+    HELP_TEXT,
+    FEEDBACK_REQUEST,
+    NEGATIVE_FEEDBACK_REASON,
+    CHARGING_FAILED_RETRY,
+    MISSING_FEEDBACK_HEADER,
+    NO_MISSING_FEEDBACK,
+    PAYMENT_RECEIVED_CONFIRM,
+    PAYMENT_SENT_CONFIRM,
+    TRANSACTION_UPDATE_TITLE,
+    REMINDER_TITLE,
+    SYSTEM_NOTIFICATION,
+    
+    // Funzioni di formattazione legacy
+    formatPriceExamples,
+    formatUserStats,
+    getStatusText,
+    getStatusEmoji,
+    formatTransactionSummary,
+    formatAnnouncementSummary,
+    formatNotificationMessage,
+    
+    // Formatters object (nuovi)
+    formatters,
+    
+    // Templates object (legacy + nuovi)
+    templates,
+    
+    // Costanti di stato per compatibilità
+    TRANSACTION_STATUS
+};
