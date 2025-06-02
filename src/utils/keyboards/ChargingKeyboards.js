@@ -37,6 +37,42 @@ class ChargingKeyboards {
         
         return Markup.inlineKeyboard(buttons);
     }
+
+    static getRetryActivationKeyboard(retryCount) {
+        return this.getRetryKeyboard(retryCount);
+    }
+
+    static getSellerChargingActionsKeyboard(transactionId) {
+        return Markup.inlineKeyboard([
+            [Markup.button.callback('⚡ Attiva ricarica ORA', `activate_charging_${transactionId}`)],
+            [Markup.button.callback('⏸️ Ritarda di 5 min', `delay_charging_${transactionId}`)],
+            [Markup.button.callback('❌ Problemi tecnici', `technical_issues_${transactionId}`)]
+        ]);
+    }
+
+    static getBuyerArrivedConfirmKeyboard(transactionId) {
+        return Markup.inlineKeyboard([
+            [Markup.button.callback('📍 Sono arrivato alla colonnina', `arrived_at_station_${transactionId}`)]
+        ]);
+    }
+
+    static getChargingConfirmKeyboard(transactionId) {
+        return Markup.inlineKeyboard([
+            [
+                Markup.button.callback('✅ Confermo, sta caricando', `charging_ok_${transactionId}`),
+                Markup.button.callback('❌ Non sta caricando', `charging_fail_${transactionId}`)
+            ]
+        ]);
+    }
+
+    static getKwhValidationKeyboard(shortId) {
+        return Markup.inlineKeyboard([
+            [
+                Markup.button.callback('✅ Corretti', `kwh_ok_${shortId}`),
+                Markup.button.callback('❌ Non corretti', `kwh_bad_${shortId}`)
+            ]
+        ]);
+    }
 }
 
 module.exports = ChargingKeyboards;
