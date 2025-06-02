@@ -32,6 +32,23 @@ class FeedbackKeyboards {
         
         return Markup.inlineKeyboard(buttons);
     }
+
+    static getFeedbackKeyboard() {
+        return this.getRatingKeyboard();
+    }
+
+    static getPostFeedbackKeyboard() {
+        return Markup.inlineKeyboard([
+            [Markup.button.callback('🏠 Menu principale', 'back_to_main')]
+        ]);
+    }
+
+    static getFeedbackReminderKeyboard(transactionId) {
+        return Markup.inlineKeyboard([
+            [Markup.button.callback('⭐ Lascia feedback', `feedback_tx_${transactionId}`)],
+            [Markup.button.callback('⏭️ Più tardi', 'dismiss_notification')]
+        ]);
+    }
 }
 
 module.exports = FeedbackKeyboards;
