@@ -1,4 +1,4 @@
-// src/handlers/commands/CommandHandler.js - NUOVO FILE (sostituisce il vecchio)
+// src/handlers/commands/CommandHandler.js - FIX per errore upsertUser
 const BaseHandler = require('../base/BaseHandler');
 const Messages = require('../../utils/messages/Messages');
 const Keyboards = require('../../utils/keyboards/Keyboards');
@@ -52,13 +52,34 @@ class CommandHandler extends BaseHandler {
     async handleStart(ctx) {
         const userId = ctx.from.id;
         
-        // Register/update user
-        await this.services.user.upsertUser({
-            userId: ctx.from.id,
-            username: ctx.from.username,
-            firstName: ctx.from.first_name,
-            lastName: ctx.from.last_name
-        });
+        try {
+            // FIX: Verifica che userService esista e abbia il metodo upsertUser
+            if (!this.services.user) {
+                console.error('UserService not available in CommandHandler');
+                await ctx.reply('❌ Servizio utenti non disponibile. Riprova più tardi.');
+                return;
+            }
+            
+            if (typeof this.services.user.upsertUser !== 'function') {
+                console.error('upsertUser method not found in UserService');
+                await ctx.reply('❌ Errore nel servizio utenti. Riprova più tardi.');
+                return;
+            }
+            
+            // Register/update user
+            await this.services.user.upsertUser({
+                userId: ctx.from.id,
+                username: ctx.from.username,
+                firstName: ctx.from.first_name,
+                lastName: ctx.from.last_name
+            });
+            
+            console.log(`User ${userId} upserted successfully`);
+            
+        } catch (error) {
+            console.error('Error in handleStart upsertUser:', error);
+            // Continua comunque con la procedura di start
+        }
         
         // Check for deep link
         const startPayload = ctx.message.text.split(' ')[1];
@@ -71,7 +92,7 @@ class CommandHandler extends BaseHandler {
         // Normal start
         await this.utils.chatCleaner.cleanupUserMessages(ctx, ['temporary', 'navigation']);
         
-        await ctx.reply(Messages.WELCOME, {
+        await ctx.reply(Messages.WELCOME || 'Benvenuto nel bot KWH!', {
             parse_mode: 'Markdown',
             reply_markup: Keyboards.MAIN_MENU.reply_markup
         });
@@ -83,20 +104,25 @@ class CommandHandler extends BaseHandler {
     async handleContactDeepLink(ctx, payload) {
         const announcementId = payload.replace('contact_', '');
         
-        const announcement = await this.services.announcement.getAnnouncement(announcementId);
-        
-        if (!announcement || !announcement.active) {
-            await ctx.reply('❌ Annuncio non trovato o non più disponibile.', Keyboards.MAIN_MENU);
-            return;
+        try {
+            const announcement = await this.services.announcement.getAnnouncement(announcementId);
+            
+            if (!announcement || !announcement.active) {
+                await ctx.reply('❌ Annuncio non trovato o non più disponibile.', Keyboards.MAIN_MENU);
+                return;
+            }
+            
+            if (announcement.userId === ctx.from.id) {
+                await ctx.reply('❌ Non puoi acquistare dal tuo stesso annuncio!', Keyboards.MAIN_MENU);
+                return;
+            }
+            
+            ctx.session.announcementId = announcementId;
+            await ctx.scene.enter('contactSellerScene');
+        } catch (error) {
+            console.error('Error in handleContactDeepLink:', error);
+            await ctx.reply('❌ Errore nell\'apertura dell\'annuncio.', Keyboards.MAIN_MENU);
         }
-        
-        if (announcement.userId === ctx.from.id) {
-            await ctx.reply('❌ Non puoi acquistare dal tuo stesso annuncio!', Keyboards.MAIN_MENU);
-            return;
-        }
-        
-        ctx.session.announcementId = announcementId;
-        await ctx.scene.enter('contactSellerScene');
     }
 
     /**
@@ -116,9 +142,9 @@ class CommandHandler extends BaseHandler {
      * Handle /help command
      */
     async handleHelp(ctx) {
-        await this.utils.chatCleaner.replaceMessage(ctx, Messages.HELP_TEXT, {
+        await this.utils.chatCleaner.replaceMessage(ctx, Messages.HELP_TEXT || 'Guida non disponibile', {
             parse_mode: 'Markdown',
-            reply_markup: Keyboards.help.getHelpKeyboard().reply_markup,
+            reply_markup: Keyboards.help?.getHelpKeyboard()?.reply_markup || Keyboards.getBackToMainMenuKeyboard().reply_markup,
             messageType: 'help'
         });
     }
@@ -136,7 +162,7 @@ class CommandHandler extends BaseHandler {
             '👨‍⚖️ **DASHBOARD ADMIN**\n\nSeleziona un\'opzione:',
             {
                 parse_mode: 'Markdown',
-                reply_markup: Keyboards.admin.getDashboardKeyboard().reply_markup,
+                reply_markup: Keyboards.admin?.getDashboardKeyboard()?.reply_markup || Keyboards.getBackToMainMenuKeyboard().reply_markup,
                 messageType: 'admin'
             }
         );
@@ -148,15 +174,21 @@ class CommandHandler extends BaseHandler {
     async handleStats(ctx) {
         if (ctx.from.id != this.bot.adminUserId) return;
         
-        const stats = await this.services.transaction.getTransactionStats();
-        const announcementStats = await this.services.announcement.getAnnouncementStats();
-        
-        const statsText = Messages.formatters.admin.generalStats(stats, announcementStats);
-        
-        await this.utils.chatCleaner.replaceMessage(ctx, statsText, { 
-            parse_mode: 'Markdown',
-            messageType: 'admin'
-        });
+        try {
+            const stats = await this.services.transaction.getTransactionStats();
+            const announcementStats = await this.services.announcement.getAnnouncementStats();
+            
+            const statsText = Messages.formatters?.admin?.generalStats(stats, announcementStats) || 
+                'Statistiche non disponibili al momento.';
+            
+            await this.utils.chatCleaner.replaceMessage(ctx, statsText, { 
+                parse_mode: 'Markdown',
+                messageType: 'admin'
+            });
+        } catch (error) {
+            console.error('Error in handleStats:', error);
+            await ctx.reply('❌ Errore nel recupero delle statistiche.');
+        }
     }
 
     /**
@@ -165,40 +197,47 @@ class CommandHandler extends BaseHandler {
     async handleMissingFeedback(ctx) {
         const userId = ctx.from.id;
         
-        const transactions = await this.services.transaction.getUserTransactions(userId, 'all');
-        const completedTransactions = transactions.filter(t => t.status === TRANSACTION_STATUS.COMPLETED);
-        
-        const missingFeedback = [];
-        for (const tx of completedTransactions) {
-            const feedbacks = await this.db.getCollection('feedback')
-                .find({ 
-                    transactionId: tx.transactionId,
-                    fromUserId: userId
-                }).toArray();
-                
-            if (feedbacks.length === 0) {
-                missingFeedback.push(tx);
-            }
-        }
-        
-        if (missingFeedback.length === 0) {
-            await ctx.reply(
-                Messages.templates.feedback.noMissingFeedback(),
-                {
-                    parse_mode: 'Markdown',
-                    reply_markup: Keyboards.MAIN_MENU.reply_markup
+        try {
+            const transactions = await this.services.transaction.getUserTransactions(userId, 'all');
+            const completedTransactions = transactions.filter(t => t.status === TRANSACTION_STATUS.COMPLETED);
+            
+            const missingFeedback = [];
+            for (const tx of completedTransactions) {
+                const feedbacks = await this.db.getCollection('feedback')
+                    .find({ 
+                        transactionId: tx.transactionId,
+                        fromUserId: userId
+                    }).toArray();
+                    
+                if (feedbacks.length === 0) {
+                    missingFeedback.push(tx);
                 }
-            );
-            return;
+            }
+            
+            if (missingFeedback.length === 0) {
+                await ctx.reply(
+                    Messages.templates?.feedback?.noMissingFeedback() || '✅ Nessun feedback mancante!',
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: Keyboards.MAIN_MENU.reply_markup
+                    }
+                );
+                return;
+            }
+            
+            const message = Messages.formatters?.feedback?.missingList(missingFeedback, userId) || 
+                `Hai ${missingFeedback.length} feedback mancanti.`;
+            const keyboard = Keyboards.feedback?.getMissingListKeyboard(missingFeedback, userId) || 
+                Keyboards.getBackToMainMenuKeyboard();
+            
+            await ctx.reply(message, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard
+            });
+        } catch (error) {
+            console.error('Error in handleMissingFeedback:', error);
+            await ctx.reply('❌ Errore nel recupero dei feedback mancanti.');
         }
-        
-        const message = Messages.formatters.feedback.missingList(missingFeedback, userId);
-        const keyboard = Keyboards.feedback.getMissingListKeyboard(missingFeedback, userId);
-        
-        await ctx.reply(message, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard
-        });
     }
 
     /**
@@ -207,41 +246,49 @@ class CommandHandler extends BaseHandler {
     async handlePayments(ctx) {
         const userId = ctx.from.id;
         
-        const transactions = await this.services.transaction.getUserTransactions(userId, 'all');
-        const paymentPending = transactions.filter(t => 
-            t.status === TRANSACTION_STATUS.PAYMENT_REQUESTED && t.buyerId === userId
-        );
-        
-        if (paymentPending.length === 0) {
-            await this.utils.chatCleaner.sendTemporaryMessage(ctx,
-                '✅ Non hai pagamenti in sospeso.',
-                {},
-                3000
+        try {
+            const transactions = await this.services.transaction.getUserTransactions(userId, 'all');
+            const paymentPending = transactions.filter(t => 
+                t.status === TRANSACTION_STATUS.PAYMENT_REQUESTED && t.buyerId === userId
             );
             
-            setTimeout(async () => {
-                await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
-            }, 3000);
-            return;
+            if (paymentPending.length === 0) {
+                await this.utils.chatCleaner.sendTemporaryMessage(ctx,
+                    '✅ Non hai pagamenti in sospeso.',
+                    {},
+                    3000
+                );
+                
+                setTimeout(async () => {
+                    await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
+                }, 3000);
+                return;
+            }
+            
+            const announcements = await Promise.all(
+                paymentPending.map(tx => 
+                    this.services.announcement.getAnnouncement(tx.announcementId)
+                )
+            );
+            
+            const { message, keyboard } = await Messages.formatters?.payment?.pendingList(
+                paymentPending,
+                announcements,
+                ctx.session
+            ) || { 
+                message: `Hai ${paymentPending.length} pagamenti in sospeso.`, 
+                keyboard: Keyboards.getBackToMainMenuKeyboard() 
+            };
+            
+            await this.utils.chatCleaner.replaceMessage(ctx, message, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard,
+                messageType: 'payment'
+            });
+        } catch (error) {
+            console.error('Error in handlePayments:', error);
+            await ctx.reply('❌ Errore nel recupero dei pagamenti.');
         }
-        
-        const announcements = await Promise.all(
-            paymentPending.map(tx => 
-                this.services.announcement.getAnnouncement(tx.announcementId)
-            )
-        );
-        
-        const { message, keyboard } = await Messages.formatters.payment.pendingList(
-            paymentPending,
-            announcements,
-            ctx.session
-        );
-        
-        await this.utils.chatCleaner.replaceMessage(ctx, message, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard,
-            messageType: 'payment'
-        });
     }
 
     /**
@@ -250,13 +297,19 @@ class CommandHandler extends BaseHandler {
     setupTextHandlers() {
         // Vendi KWH
         this.bot.bot.hears('🔋 Vendi KWH', async (ctx) => {
-            await ctx.scene.enter('sellAnnouncementScene');
+            try {
+                await ctx.scene.enter('sellAnnouncementScene');
+            } catch (error) {
+                console.error('Error entering sellAnnouncementScene:', error);
+                await ctx.reply('❌ Errore nell\'apertura della sezione vendita.');
+            }
         });
 
         // Compra KWH
         this.bot.bot.hears('🛒 Compra KWH', async (ctx) => {
             await ctx.reply(
-                Messages.templates.navigation.buyEnergyInfo(),
+                Messages.templates?.navigation?.buyEnergyInfo() || 
+                '🛒 **ACQUISTA ENERGIA**\n\nTrova le migliori offerte di ricarica!',
                 {
                     parse_mode: 'Markdown',
                     reply_markup: {
@@ -303,20 +356,25 @@ class CommandHandler extends BaseHandler {
             const transactionId = ctx.message.text.match(/([TA][\d\w_-]+)/)[1];
             const userId = ctx.from.id;
             
-            const transaction = await this.services.transaction.getTransaction(transactionId);
-            
-            if (!transaction) {
-                await this.utils.chatCleaner.sendErrorMessage(ctx, '❌ Transazione non trovata.');
-                return;
+            try {
+                const transaction = await this.services.transaction.getTransaction(transactionId);
+                
+                if (!transaction) {
+                    await this.utils.chatCleaner.sendErrorMessage(ctx, '❌ Transazione non trovata.');
+                    return;
+                }
+                
+                if (transaction.sellerId !== userId && transaction.buyerId !== userId) {
+                    await this.utils.chatCleaner.sendErrorMessage(ctx, '❌ Non autorizzato.');
+                    return;
+                }
+                
+                ctx.session.transactionId = transactionId;
+                await this.utils.chatCleaner.enterScene(ctx, 'transactionScene');
+            } catch (error) {
+                console.error('Error in transaction ID handler:', error);
+                await this.utils.chatCleaner.sendErrorMessage(ctx, '❌ Errore nell\'apertura della transazione.');
             }
-            
-            if (transaction.sellerId !== userId && transaction.buyerId !== userId) {
-                await this.utils.chatCleaner.sendErrorMessage(ctx, '❌ Non autorizzato.');
-                return;
-            }
-            
-            ctx.session.transactionId = transactionId;
-            await this.utils.chatCleaner.enterScene(ctx, 'transactionScene');
         });
     }
 
@@ -324,117 +382,153 @@ class CommandHandler extends BaseHandler {
 
     async handleMyAnnouncements(ctx) {
         const userId = ctx.from.id;
-        const announcements = await this.services.announcement.getUserAnnouncements(userId);
         
-        if (announcements.length === 0) {
-            await this.utils.chatCleaner.sendTemporaryMessage(ctx,
-                '📭 Non hai ancora pubblicato annunci.',
-                {},
-                3000
-            );
+        try {
+            const announcements = await this.services.announcement.getUserAnnouncements(userId);
             
-            setTimeout(async () => {
-                await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
-            }, 3000);
-            return;
-        }
+            if (announcements.length === 0) {
+                await this.utils.chatCleaner.sendTemporaryMessage(ctx,
+                    '📭 Non hai ancora pubblicato annunci.',
+                    {},
+                    3000
+                );
+                
+                setTimeout(async () => {
+                    await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
+                }, 3000);
+                return;
+            }
 
-        const message = Messages.formatters.announcement.userList(announcements, this.services.announcement);
-        
-        await this.utils.chatCleaner.replaceMessage(ctx, message, {
-            parse_mode: 'Markdown',
-            reply_markup: Keyboards.announcement.getUserListKeyboard(announcements).reply_markup,
-            messageType: 'navigation'
-        });
+            const message = Messages.formatters?.announcement?.userList(announcements, this.services.announcement) ||
+                `📊 Hai ${announcements.length} annunci attivi.`;
+            
+            await this.utils.chatCleaner.replaceMessage(ctx, message, {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.announcement?.getUserListKeyboard(announcements)?.reply_markup || 
+                    Keyboards.getBackToMainMenuKeyboard().reply_markup,
+                messageType: 'navigation'
+            });
+        } catch (error) {
+            console.error('Error in handleMyAnnouncements:', error);
+            await ctx.reply('❌ Errore nel recupero degli annunci.');
+        }
     }
 
     async handleMyTransactions(ctx) {
         const userId = ctx.from.id;
-        const transactions = await this.services.transaction.getUserTransactions(userId, 'all');
         
-        if (transactions.length === 0) {
-            await this.utils.chatCleaner.sendTemporaryMessage(ctx,
-                '📭 Non hai ancora transazioni.',
-                {},
-                3000
-            );
+        try {
+            const transactions = await this.services.transaction.getUserTransactions(userId, 'all');
             
-            setTimeout(async () => {
-                await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
-            }, 3000);
-            return;
+            if (transactions.length === 0) {
+                await this.utils.chatCleaner.sendTemporaryMessage(ctx,
+                    '📭 Non hai ancora transazioni.',
+                    {},
+                    3000
+                );
+                
+                setTimeout(async () => {
+                    await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
+                }, 3000);
+                return;
+            }
+
+            const pending = transactions.filter(t => 
+                ![TRANSACTION_STATUS.COMPLETED, TRANSACTION_STATUS.CANCELLED].includes(t.status)
+            );
+            const completed = transactions.filter(t => t.status === TRANSACTION_STATUS.COMPLETED);
+
+            const message = Messages.formatters?.transaction?.listHeader(pending.length, completed.length) ||
+                `💼 Hai ${pending.length} transazioni in corso e ${completed.length} completate.`;
+            
+            await this.utils.chatCleaner.replaceMessage(ctx, message, {
+                parse_mode: 'Markdown',
+                reply_markup: Keyboards.transaction?.getListKeyboard(pending, completed)?.reply_markup ||
+                    Keyboards.getBackToMainMenuKeyboard().reply_markup,
+                messageType: 'navigation'
+            });
+        } catch (error) {
+            console.error('Error in handleMyTransactions:', error);
+            await ctx.reply('❌ Errore nel recupero delle transazioni.');
         }
-
-        const pending = transactions.filter(t => 
-            ![TRANSACTION_STATUS.COMPLETED, TRANSACTION_STATUS.CANCELLED].includes(t.status)
-        );
-        const completed = transactions.filter(t => t.status === TRANSACTION_STATUS.COMPLETED);
-
-        const message = Messages.formatters.transaction.listHeader(pending.length, completed.length);
-        
-        await this.utils.chatCleaner.replaceMessage(ctx, message, {
-            parse_mode: 'Markdown',
-            reply_markup: Keyboards.transaction.getListKeyboard(pending, completed).reply_markup,
-            messageType: 'navigation'
-        });
     }
 
     async handlePendingRequests(ctx) {
         const userId = ctx.from.id;
-        const pendingTransactions = await this.services.transaction.getUserTransactions(userId, 'seller');
-        const pendingRequests = pendingTransactions.filter(t => t.status === TRANSACTION_STATUS.PENDING_SELLER);
         
-        if (pendingRequests.length === 0) {
-            await this.utils.chatCleaner.sendTemporaryMessage(ctx,
-                '📭 Non hai richieste di acquisto in attesa.',
-                {},
-                3000
-            );
+        try {
+            const pendingTransactions = await this.services.transaction.getUserTransactions(userId, 'seller');
+            const pendingRequests = pendingTransactions.filter(t => t.status === TRANSACTION_STATUS.PENDING_SELLER);
             
-            setTimeout(async () => {
-                await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
-            }, 3000);
-            return;
-        }
+            if (pendingRequests.length === 0) {
+                await this.utils.chatCleaner.sendTemporaryMessage(ctx,
+                    '📭 Non hai richieste di acquisto in attesa.',
+                    {},
+                    3000
+                );
+                
+                setTimeout(async () => {
+                    await ctx.reply('Torna al menu principale:', Keyboards.MAIN_MENU);
+                }, 3000);
+                return;
+            }
 
-        await this.utils.chatCleaner.cleanupUserMessages(ctx, ['temporary', 'navigation']);
+            await this.utils.chatCleaner.cleanupUserMessages(ctx, ['temporary', 'navigation']);
 
-        for (const transaction of pendingRequests) {
-            const buyer = await this.services.user.getUser(transaction.buyerId);
-            const announcement = await this.services.announcement.getAnnouncement(transaction.announcementId);
-            
-            const requestText = MarkdownEscape.formatPurchaseRequest({
-                username: buyer?.username,
-                firstName: buyer?.firstName,
-                scheduledDate: transaction.scheduledDate,
-                brand: transaction.brand,
-                currentType: transaction.currentType,
-                location: transaction.location,
-                connector: transaction.connector,
-                transactionId: transaction.transactionId
-            });
-            
-            const keyboard = Keyboards.transaction.getRequestKeyboard(transaction, buyer);
-            
-            await this.utils.chatCleaner.sendPersistentMessage(ctx, requestText, {
-                parse_mode: 'Markdown',
-                reply_markup: keyboard
-            });
-            
-            await new Promise(resolve => setTimeout(resolve, 100));
+            for (const transaction of pendingRequests) {
+                const buyer = await this.services.user.getUser(transaction.buyerId);
+                const announcement = await this.services.announcement.getAnnouncement(transaction.announcementId);
+                
+                const requestText = MarkdownEscape.formatPurchaseRequest({
+                    username: buyer?.username,
+                    firstName: buyer?.firstName,
+                    scheduledDate: transaction.scheduledDate,
+                    brand: transaction.brand,
+                    currentType: transaction.currentType,
+                    location: transaction.location,
+                    connector: transaction.connector,
+                    transactionId: transaction.transactionId
+                });
+                
+                const keyboard = Keyboards.transaction?.getRequestKeyboard(transaction, buyer) || {
+                    inline_keyboard: [
+                        [
+                            { text: '✅ Accetto', callback_data: `accept_request_${transaction.transactionId}` },
+                            { text: '❌ Rifiuto', callback_data: `reject_request_${transaction.transactionId}` }
+                        ]
+                    ]
+                };
+                
+                await this.utils.chatCleaner.sendPersistentMessage(ctx, requestText, {
+                    parse_mode: 'Markdown',
+                    reply_markup: keyboard
+                });
+                
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        } catch (error) {
+            console.error('Error in handlePendingRequests:', error);
+            await ctx.reply('❌ Errore nel recupero delle richieste.');
         }
     }
 
     async handleMyFeedback(ctx) {
         const userId = ctx.from.id;
-        const userStats = await this.services.user.getUserStats(userId);
         
-        const message = Messages.formatUserStats(userStats);
-        
-        await this.utils.chatCleaner.replaceMessage(ctx, message, {
-            parse_mode: 'Markdown',
-            messageType: 'stats'
-        });
+        try {
+            const userStats = await this.services.user.getUserStats(userId);
+            
+            const message = Messages.formatUserStats ? Messages.formatUserStats(userStats) : 
+                'Statistiche non disponibili al momento.';
+            
+            await this.utils.chatCleaner.replaceMessage(ctx, message, {
+                parse_mode: 'Markdown',
+                messageType: 'stats'
+            });
+        } catch (error) {
+            console.error('Error in handleMyFeedback:', error);
+            await ctx.reply('❌ Errore nel recupero delle statistiche.');
+        }
     }
 }
 
