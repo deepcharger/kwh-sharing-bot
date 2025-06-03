@@ -1,4 +1,4 @@
-// src/handlers/base/BaseHandler.js - NUOVO FILE
+// src/handlers/base/BaseHandler.js
 const { ERROR_TYPES } = require('../../config/constants');
 
 class BaseHandler {
@@ -7,13 +7,8 @@ class BaseHandler {
         this.db = bot.db;
         this.telegram = bot.bot.telegram;
         
-        // Services shortcuts
-        this.services = {
-            user: bot.userService,
-            announcement: bot.announcementService,
-            transaction: bot.transactionService,
-            notification: bot.notificationService
-        };
+        // Services shortcuts - FIX: accediamo correttamente ai servizi
+        this.services = bot.services || {};
         
         // Utils shortcuts
         this.utils = {
