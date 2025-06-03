@@ -1,6 +1,6 @@
 const { Scenes } = require('telegraf');
-const Messages = require('../utils/Messages');
-const Keyboards = require('../utils/Keyboards');
+const Messages = require('../utils/messages/Messages');
+const Keyboards = require('../utils/keyboards/Keyboards');
 const MarkdownEscape = require('../utils/MarkdownEscape');
 
 function createTransactionScene(bot) {
@@ -767,7 +767,7 @@ function createTransactionScene(bot) {
 
             try {
                 // Importa la classe TransactionCache per accedere al metodo statico
-                const { TransactionCache } = require('../utils/TransactionCache');
+                const { TransactionCache } = require('../utils/cache/TransactionCache');
                 const shortId = TransactionCache.generateShortId(transaction.transactionId);
                 bot.transactionCache.set(shortId, transaction.transactionId);
 
