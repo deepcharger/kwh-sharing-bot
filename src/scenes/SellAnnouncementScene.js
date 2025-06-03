@@ -1,6 +1,6 @@
 const { Scenes } = require('telegraf');
-const Messages = require('../utils/Messages');
-const Keyboards = require('../utils/Keyboards');
+const Messages = require('../utils/messages/Messages');
+const Keyboards = require('../utils/keyboards/Keyboards');
 const MarkdownEscape = require('../utils/MarkdownEscape');
 
 function createSellAnnouncementScene(bot) {
